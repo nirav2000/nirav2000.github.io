@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Finger + Key Tracker</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 { color: #333; }
+    video {
+      border: 2px solid #333;
+      border-radius: 8px;
+      margin: 20px 0;
+      max-width: 90%;
+    }
+    #feedback {
+      font-size: 20px;
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 5px;
+      background: #eee;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <h1>Typing Finger Tracker Prototype</h1>
+  <video id="video" autoplay playsinline></video>
+  <div id="feedback">Press "F" or "J" to test finger correctness</div>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    const video = document.getElementById("video");
+    const feedback = document.getElementById("feedback");
+
+    // Expected finger mapping for demo keys
+    const fingerMap = {
+      "f": "L_index",
+      "j": "R_index"
+    };
+
+    let pressedKey = null;
+
+    // Keyboard listener
+    document.addEventListener("keydown", (e) => {
+      pressedKey = e.key.toLowerCase();
+    });
+
+    // Initialize MediaPipe Hands
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
+    });
+
+    hands.onResults(onResults);
+
+    // Camera setup
+    const camera = new Camera(video, {
+      onFrame: async () => {
+        await hands.send({ image: video });
+      },
+      width: 640,
+      height: 480
+    });
+    camera.start();
+
+    function onResults(results) {
+      if (results.multiHandLandmarks && results.multiHandedness) {
+        results.multiHandLandmarks.forEach((landmarks, i) => {
+          const handLabel = results.multiHandedness[i].label; // "Left" or "Right"
+
+          // Determine which fingertip is highest (simplified "active finger")
+          const fingertipIds = { thumb: 4, index: 8, middle: 12, ring: 16, pinky: 20 };
+          let activeFinger = null;
+          let minY = 1; // normalized coordinates (0 top, 1 bottom)
+
+          for (const [finger, idx] of Object.entries(fingertipIds)) {
+            if (landmarks[idx].y < minY) {
+              minY = landmarks[idx].y;
+              activeFinger = finger;
+            }
+          }
+
+          // If a key was pressed, check correctness
+          if (pressedKey) {
+            const expected = fingerMap[pressedKey];
+            const used = `${handLabel[0]}_${activeFinger}`;
+
+            if (expected && expected.toLowerCase() === used.toLowerCase()) {
+              feedback.innerHTML = `✅ Correct finger for "${pressedKey.toUpperCase()}"`;
+              feedback.style.background = "#d4edda"; // green
+            } else {
+              feedback.innerHTML = `❌ Wrong finger for "${pressedKey.toUpperCase()}" (used: ${used})`;
+              feedback.style.background = "#f8d7da"; // red
+            }
+
+            pressedKey = null; // reset
+          }
+        });
+      } else {
+        feedback.innerHTML = 'Place your hands in view of the camera and press "F" or "J"';
+        feedback.style.background = "#eee";
+      }
+    }
+  </script>
+</body>
+</html>
