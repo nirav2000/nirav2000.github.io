@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1424">
+  <title>GP Website Intelligence · Public Directory</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail" aria-label="Project navigation">
+    <a href="./" class="logo" title="Biz repository">B<span>·</span></a>
+    <div class="rail-item active" title="Overview" aria-label="Overview">▦</div>
+    <a class="rail-item" title="Approved public data" href="./data/public.json">{ }</a>
+    <a class="rail-item" title="Methodology" href="./methodology.html">&lt;/&gt;</a>
+  </aside>
+  <main>
+    <header class="topbar">
+      <div><div class="eyebrow">BIZ / BUSINESS IDEAS / HEALTHCARE INTELLIGENCE</div>
+        <h1>GP Website <span>Intelligence</span></h1>
+        <p class="subtitle">UK practice directory, supplier evidence, technology fingerprints and migration opportunities.</p>
+      </div>
+      <div class="top-actions"><div id="coveragePill" class="pill pending">Checking dataset</div>
+        <button id="exportBtn" class="button button-primary">↓ Export filtered CSV</button>
+      </div>
+    </header>
+    <section class="source-strip" id="sourceStatus" aria-live="polite">Loading dataset…</section>
+    <section id="kpis" class="kpis" aria-label="Key metrics"></section>
+    <section class="filter-panel" aria-label="Search and filter">
+      <div class="filter-top"><h2>Explore the directory</h2><span id="shownCount" class="muted"></span></div>
+      <div class="filter-grid">
+        <label class="search-box"><span>⌕</span><input id="search" type="search" placeholder="Practice, ODS, postcode, website, address…" autocomplete="off"></label>
+        <label><span>Supplier relationship</span><select id="supplierFilter"><option value="">All suppliers</option><option value="silicon_practice">Silicon Practice</option><option value="fpm_my_surgery_website">FPM / My Surgery Website</option><option value="other">Other named suppliers</option><option value="unknown">No supplier evidence</option></select></label>
+        <label><span>Product / evidence</span><select id="productFilter"><option value="">All evidence</option><option value="website">Website product</option><option value="footfall">FootFall</option><option value="improvewell">ImproveWell</option><option value="direct">Live direct attribution</option><option value="inferred">Template suggestion</option></select></label>
+        <label><span>Website state</span><select id="websiteFilter"><option value="">All websites</option><option value="has">URL known</option><option value="missing">URL missing</option><option value="scanned">Scanned</option><option value="unchecked">Never scanned</option><option value="not200">Not HTTP 200</option></select></label>
+        <label><span>Practice type</span><select id="scopeFilter"><option value="">All organisations</option><option value="ods">Official ODS codes</option><option value="gp">GP practices</option><option value="seed">Research without official ODS validation</option></select></label>
+        <label><span>Region</span><select id="regionFilter"><option value="">All regions</option></select></label>
+        <button class="button button-secondary clear" id="resetBtn">Reset filters</button>
+      </div>
+    </section>
+    <section class="visual-grid" aria-label="Charts and breakdowns">
+      <article class="panel"><div class="panel-head"><div><h2>Supplier relationships</h2><p>Historical claims and current on-page evidence are separate.</p></div></div><div id="supplierBars" class="bar-chart"></div><div class="legend">Click a bar to filter. A relationship is not a confirmed live contract.</div></article>
+      <article class="panel"><div class="panel-head"><div><h2>Website coverage</h2><p>How much of the directory has been technically inspected?</p></div></div><div class="coverage-bars" id="coverageBars"></div></article>
+      <article class="panel"><div class="panel-head"><div><h2>By area</h2><p>Regions as published in source records.</p></div></div><div id="regionBars" class="bar-chart"></div></article>
+      <article class="panel"><div class="panel-head"><div><h2>Data integrity</h2><p>Evidence-backed signals versus unresolved entries.</p></div></div><div id="integritySummary" class="integrity-grid"></div></article>
+    </section>
+    <section class="panel table-panel" aria-label="GP practices">
+      <div class="panel-head flex-head"><div><h2>Organisations</h2><p>Select a row to see supplier evidence and scan details.</p></div><button class="button button-secondary" id="downloadJson">↓ Export filtered JSON</button></div>
+      <div class="table-scroll"><table><thead><tr><th>Practice</th><th>ODS code</th><th>Postcode</th><th>Website</th><th>Supplier evidence</th><th>Site check</th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div class="pagination"><button id="prevBtn" class="button button-secondary">← Previous</button><span id="pageInfo">Page 1</span><button id="nextBtn" class="button button-secondary">Next →</button></div>
+    </section>
+    <section id="details" class="detail-panel" hidden aria-live="polite"></section>
+    <footer>Public release v1.0.1 · Independent research · Not affiliated with the NHS, CQC, Silicon Practice or FPM · No patient information · <a href="./methodology.html">Methodology</a></footer>
+  </main>
+</div>
+</body>
+</html>
