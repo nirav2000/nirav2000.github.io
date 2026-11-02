@@ -128,7 +128,7 @@ final class PianoMidiInput {
 
     func scanAndConnect() {
         let count = Int(MIDIGetNumberOfSources())
-        let endpoints = (0..<count).map { MIDIGetSource(ItemCount($0)) }.filter { $0 != 0 }
+        let endpoints = (0..<count).map { MIDIGetSource($0) }.filter { $0 != 0 }
         let current = Set(endpoints)
         for old in connected.subtracting(current) { MIDIPortDisconnectSource(input, old) }
         for endpoint in current.subtracting(connected) {
