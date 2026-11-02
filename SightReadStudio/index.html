@@ -19,15 +19,17 @@
       <a class="brand" href="#home" aria-label="SightRead Studio home"><span class="brand-mark" aria-hidden="true">𝄞</span><span><b>SightRead</b><small>STUDIO / PIANO</small></span></a>
       <p class="nav-label">YOUR STUDIO</p>
       <nav id="side-nav" aria-label="Main menu"></nav>
-      <div class="sidebar-foot"><span class="status-light"></span><span>Saved on this device</span><small>v1.0.1</small></div>
+      <div class="sidebar-foot"><span class="status-light"></span><span>Saved on this device</span><small>v2.0.0</small></div>
     </aside>
     <div class="main-column">
-      <header class="topbar"><div class="mobile-brand"><span class="brand-mark" aria-hidden="true">𝄞</span><strong>SightRead Studio</strong></div><span class="topbar-kicker" id="topbar-kicker">FOUNDATIONS · FIRST 7 DAYS</span><div class="topbar-actions"><span class="pill subdued" id="header-level">Pre-Grade 1</span><span class="avatar" id="profile-avatar" title="Learner">P</span></div></header>
+      <header class="topbar"><div class="mobile-brand"><span class="brand-mark" aria-hidden="true">𝄞</span><strong>SightRead Studio</strong></div><span class="topbar-kicker" id="topbar-kicker">FOUNDATIONS · FIRST 7 DAYS</span><div class="topbar-actions"><button class="midi-header" id="midi-header" data-page="connect"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 7V4M18 7V4M4 12h16M7 12v8m10-8v8M4 8h16v4H4z"/></svg>Connect piano</button><span class="pill subdued" id="header-level">Pre-Grade 1</span><span class="avatar" id="profile-avatar" title="Learner">P</span></div></header>
       <main id="app-main" class="main" tabindex="-1"></main>
       <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile menu"></nav>
     </div>
   </div>
   <div id="toast" role="status" aria-live="polite" class="toast"></div>
+  <script src="midi-core.js" defer></script>
+  <script src="midi-bridge.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

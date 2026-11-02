@@ -1,0 +1,22 @@
+name: SightRead iPad companion build
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'SightReadStudio/ios/**'
+      - '.github/workflows/sightread-ios-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-ios:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsigned iPad simulator app
+        run: |
+          xcodebuild -project SightReadStudio/ios/SightReadCompanion.xcodeproj \
+            -scheme SightReadCompanion -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build

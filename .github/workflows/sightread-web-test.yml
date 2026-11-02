@@ -1,0 +1,29 @@
+name: SightRead web MIDI tests
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'SightReadStudio/**'
+      - '.github/workflows/sightread-web-test.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate JavaScript syntax
+        run: |
+          node --check SightReadStudio/app.js
+          node --check SightReadStudio/midi-core.js
+          node --check SightReadStudio/midi-bridge.js
+      - name: Verify score generation and assessment logic
+        run: |
+          cd SightReadStudio
+          node tests/original2.cjs
+          node tests/midi-core.test.cjs
