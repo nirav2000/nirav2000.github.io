@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10192b">
+  <meta name="description" content="A gentle, measurable piano sight-reading coach: note recognition, rhythm, two-hand reading and unseen tests.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>SightRead Studio · Piano practice</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#home" aria-label="SightRead Studio home"><span class="brand-mark" aria-hidden="true">𝄞</span><span><b>SightRead</b><small>STUDIO / PIANO</small></span></a>
+      <p class="nav-label">YOUR STUDIO</p>
+      <nav id="side-nav" aria-label="Main menu"></nav>
+      <div class="sidebar-foot"><span class="status-light"></span><span>Saved on this device</span><small>v1.0</small></div>
+    </aside>
+    <div class="main-column">
+      <header class="topbar"><div class="mobile-brand"><span class="brand-mark" aria-hidden="true">𝄞</span><strong>SightRead Studio</strong></div><span class="topbar-kicker" id="topbar-kicker">FOUNDATIONS · FIRST 7 DAYS</span><div class="topbar-actions"><span class="pill subdued" id="header-level">Pre-Grade 1</span><span class="avatar" id="profile-avatar" title="Learner">P</span></div></header>
+      <main id="app-main" class="main" tabindex="-1"></main>
+      <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile menu"></nav>
+    </div>
+  </div>
+  <div id="toast" role="status" aria-live="polite" class="toast"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>
