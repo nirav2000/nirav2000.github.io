@@ -1,4 +1,4 @@
-import {normalize,summaries,topics,parseDate,matching} from './model.mjs';
+import {normalize,summaries,topics,parseDate,matching,explanationSections,reviewInsights,SKILLS,PRACTICE_ITEMS,packPrivateNotes,unpackPrivateNotes} from './model.mjs';
 const $=id=>document.getElementById(id);
 const API='https://apps-monitor-api.nirav2000-github.workers.dev/app-monitor';
 const IS_LOCAL=['localhost','127.0.0.1'].includes(location.hostname);
@@ -7,12 +7,13 @@ const access=$('accessGate'),review=$('reviewMain'),signin=$('signInBtn'),signou
 const loginMessage=$('loginMessage'),cloudStatus=$('cloudStatus'),saveBtn=$('saveNotes'),appActions=$('appActions');
 const auth=IS_LOCAL?null:window.AppsPasskeyAuth?.create({baseUrl:API,sessionStoreKey:SESSION_STORE});
 let activities=[],assetMap={},selected=null,notes={},noteTimer=null,notesDirty=false,savingNotes=false,sessionReady=false;
+let revealed=new Set(),practiceTopic='Nets and Cubes',practiceStep=0,practiceAnswer=null,practiceHint=false,practiceReason='';
 const objectUrls=new Map(),pendingAssets=new Map();
 if(IS_LOCAL){try{notes=JSON.parse(localStorage.getItem(KEY)||'{}');if(!notes||typeof notes!=='object')notes={};}catch{notes={};}}
 const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
 const noteId=(a,q)=>a.id+'::'+q.number;
 function revokeAssets(){for(const url of objectUrls.values())URL.revokeObjectURL(url);objectUrls.clear();pendingAssets.clear();}
-function resetData(){activities=[];assetMap={};selected=null;notes={};notesDirty=false;clearTimeout(noteTimer);revokeAssets();$('metrics').replaceChildren();$('activity-list').replaceChildren();$('question-list').replaceChildren();$('detail').replaceChildren();$('history').replaceChildren();$('topics').replaceChildren();}
+function resetData(){activities=[];assetMap={};selected=null;notes={};revealed.clear();notesDirty=false;clearTimeout(noteTimer);revokeAssets();for(const id of ['metrics','activity-list','question-list','detail','history','topics','coaching-insights','coaching-queue','coaching-observations','practice-lessons','practice-question'])$(id).replaceChildren();}
 function setLocked(message='Sign in with the Apps passkey to load private assessment records.'){
   sessionReady=false;resetData();access.hidden=false;review.hidden=true;signin.disabled=false;
   loginMessage.textContent=message;cloudStatus.textContent='';signout.hidden=true;saveBtn.hidden=true;appActions.hidden=true;
@@ -35,7 +36,7 @@ async function saveCloudNotes(){
   try{
     while(notesDirty&&sessionReady){
       notesDirty=false;
-      const response=await privateFetch('notes',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes})});
+      const response=await privateFetch('notes',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes:packPrivateNotes(notes)})});
       if(!response.ok)throw Error('Could not save notes (HTTP '+response.status+')');
     }
     cloudStatus.textContent='Private notes saved securely.';
@@ -45,9 +46,16 @@ async function saveCloudNotes(){
   }finally{savingNotes=false;saveBtn.disabled=false;}
 }
 function storeNote(id,value){
-  notes[id]={bookmarked:!!value.bookmarked,text:String(value.text||'')};
+  const next={bookmarked:!!value.bookmarked,text:String(value.text||'').slice(0,5000)};
+  for(const field of ['reasoning','confidence','barrier','support','outcome','reviewedAt']){
+    if(typeof value[field]==='string')next[field]=field==='reasoning'?value[field].slice(0,2000):value[field];
+  }
+  if(id.startsWith('practice::')&&Number.isSafeInteger(value.attempts)&&Number.isSafeInteger(value.successes)){
+    next.attempts=value.attempts;next.successes=value.successes;
+  }
+  notes[id]=next;
   if(IS_LOCAL){try{localStorage.setItem(KEY,JSON.stringify(notes));}catch{$('message').textContent='Could not save local notes. Export a backup.';}return;}
-  notesDirty=true;cloudStatus.textContent='Unsaved note changes…';
+  notesDirty=true;cloudStatus.textContent='Unsaved review changes…';
   clearTimeout(noteTimer);noteTimer=setTimeout(saveCloudNotes,700);
 }
 async function fetchPrivateAsset(filename){
@@ -81,7 +89,7 @@ async function loadCloudNotes(){
   if(!response.ok)throw Error('Could not load private notes.');
   const data=await response.json();
   if(!data.ok||!data.notes||typeof data.notes!=='object')throw Error('Invalid private notes response.');
-  notes=data.notes;
+  notes=unpackPrivateNotes(data.notes);
 }
 async function unlockAndLoad(){
   setUnlocked();$('message').textContent='Loading private assessment records…';
@@ -132,7 +140,7 @@ signout.addEventListener('click',async()=>{
 saveBtn.addEventListener('click',async()=>{clearTimeout(noteTimer);notesDirty=true;await saveCloudNotes();});
 window.addEventListener('storage',event=>{if(event.key===SESSION_STORE&&!event.newValue&&!IS_LOCAL)setLocked('Signed out in another tab.');});
 window.addEventListener('pagehide',revokeAssets);
-function show(view){document.querySelectorAll('.view').forEach(e=>e.hidden=e.id!==view);document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===view)));}
+function show(view){document.querySelectorAll('.view').forEach(e=>e.hidden=e.id!==view);document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===view)));if(view==='coach')renderCoach();if(view==='practice')renderPractice();}
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>show(b.dataset.view)));
 function score(a){return a.score_total?`${a.score_correct}/${a.score_total} · ${Math.round(a.score_correct/a.score_total*100)}%`:'Score unavailable';}
 function metrics(){const s=summaries(activities);$('metrics').replaceChildren(...[[s.activities,'activity records'],[s.questions,'question summaries'],[s.details,'answer / explanation records'],[s.unavailable,'sessions without answers']].map(([n,t])=>{const d=el('div',undefined,'metric');d.append(el('b',n),el('span',t));return d;}));$('message').textContent=`Partial Atom capture: ${s.details} of ${s.questions} listed questions include answer details. Missing content is marked. This is not the complete test history.`;}
@@ -149,10 +157,210 @@ function picture(url,label){
   else fetchPrivateAsset(source.slice(7)).then(loadedUrl=>{if(sessionReady&&img.isConnected)img.src=loadedUrl;}).catch(unavailable);
   return img;
 }
-function renderDetail({a,q,id}){const box=$('detail');box.replaceChildren();box.append(el('span',`${a.date} · Question ${q.number} · ${q.time_seconds??'?'}s`,'badge'),el('h2',q.prompt||q.header||'Question'),el('p',q.topic||'Topic not captured','muted'));if(q.questionImage){const d=el('div',undefined,'question-image');d.append(picture(q.questionImage,'Question diagram'));box.append(d);}if(q.answers.length){const opts=el('div',undefined,'options');q.answers.forEach(answer=>{const d=el('div',undefined,`option ${answer.correct?'right':''} ${answer.selected?'chosen':''}`);d.append(el('b',answer.letter),el('small',answer.selected?'Selected answer':''),el('small',answer.correct?'Correct answer':'',answer.correct?'correct':''));(answer.images||[]).forEach(u=>d.append(picture(u,`Option ${answer.letter}`)));opts.append(d);});box.append(opts);}if(q.explanation){const d=el('details');d.append(el('summary','Show Atom’s explanation'),el('p',q.explanation,'explanation'));const used=new Set([q.questionImage,...q.answers.flatMap(a=>a.images||[])]);for(const i of q.images||[]){if(i.src&&i.src.includes('/questions/')&&!used.has(i.src)){const panel=el('div',undefined,'question-image');panel.append(picture(i.src,'Explanation diagram'));d.append(panel);used.add(i.src);}}box.append(d);}if(!q.details_captured)box.append(el('p','Some answer details were not captured. This does not mean the question was left unanswered.','missing'));const bookmark=el('button',notes[id]?.bookmarked?'★ Bookmarked':'☆ Bookmark');bookmark.addEventListener('click',()=>{storeNote(id,{...notes[id],bookmarked:!notes[id]?.bookmarked});renderQuestions();});box.append(bookmark);const label=el('label','What did we notice?','note-label');const area=el('textarea');area.placeholder='For example: checked the rotation but missed the shading rule.';area.value=notes[id]?.text||'';area.addEventListener('input',()=>storeNote(id,{...notes[id],text:area.value}));label.append(area);box.append(label,el('p','Ask your child to explain their reasoning before deciding why an answer was wrong.','muted'));}
+
+function renderExplanation(raw){
+  const container=el('div',undefined,'explanation');
+  for(const section of explanationSections(raw)){
+    const part=el('section',undefined,'explanation-section'+(section.heading.toLowerCase()==='correct'?' final-rule':''));
+    if(section.heading)part.append(el('h3',section.heading,'explanation-heading'));
+    if(section.text)part.append(el('p',section.text,'explanation-text'));
+    container.append(part);
+  }
+  return container;
+}
+function reviewSelect(id,label,field,items,value){
+  const wrap=el('label',label,'review-field');
+  const select=el('select');
+  select.append(...items.map(([v,t])=>new Option(t,v)));
+  select.value=value||'';
+  select.addEventListener('change',()=>{
+    storeNote(id,{...notes[id],[field]:select.value,reviewedAt:new Date().toISOString()});
+  });
+  wrap.append(select);
+  return wrap;
+}
+function renderReflection(id){
+  const current=notes[id]||{};
+  const panel=el('section',undefined,'coach-question');
+  panel.append(el('h3','Explain the pattern first'),el('p','Before revealing Atom’s answer, ask the learner to describe what changed, what stayed the same, and why he chose his answer. Speak aloud or type.','muted'));
+  const prompt=el('label','Learner’s own explanation (optional if spoken aloud)','note-label');
+  const response=el('textarea');
+  response.rows=3;response.maxLength=2000;
+  response.placeholder='I noticed that… I checked… I chose this because…';
+  response.value=current.reasoning||'';
+  response.addEventListener('input',()=>{
+    storeNote(id,{...notes[id],reasoning:response.value,reviewedAt:new Date().toISOString()});
+  });
+  prompt.append(response);panel.append(prompt);
+  const grid=el('div',undefined,'review-fields');
+  grid.append(
+    reviewSelect(id,'Confidence at the time','confidence',[['','Not recorded'],['sure','Sure'],['unsure','Unsure'],['guess','Guessed'],['cannot_recall','Cannot remember']],current.confidence),
+    reviewSelect(id,'Which step was tricky? (ask the learner)','barrier',[['','Not recorded'],['rotation','Rotation / direction'],['position','Position / translation'],['shading','Shading / colour'],['counting','Counting / number'],['multiple_rules','Combining two rules'],['spatial_3d','Imagining a 3D turn / fold'],['rushed','Rushed / did not check'],['other','Something else'],['unknown','Not sure']],current.barrier),
+    reviewSelect(id,'How much support?','support',[['','Not recorded'],['independent','Independent'],['hint','One hint'],['guided','Guided step by step'],['cannot_explain','Not yet able to explain']],current.support),
+    reviewSelect(id,'After discussion','outcome',[['','Not recorded'],['explained','Explained it unaided'],['needed_help','Explained with help'],['not_yet','Not yet secure']],current.outcome)
+  );panel.append(grid);
+  panel.append(el('p','These are family observations, not an AI diagnosis. Review them together before treating a pattern as a learning need.','fine-print'));
+  return panel;
+}
+function skillCard(topic){
+  const skill=SKILLS[topic];if(!skill)return null;
+  const card=el('section',undefined,'skill-card');
+  card.append(el('h3','A technique to try: '+skill.name),el('p',skill.idea));
+  const steps=el('ol');for(const step of skill.steps)steps.append(el('li',step));card.append(steps);
+  card.append(el('p','Ask the learner: '+skill.check,'skill-check'));
+  const p=el('p','Away from the screen: '+skill.transfer,'muted');card.append(p);
+  if(PRACTICE_ITEMS.some(x=>x.topic===topic)){
+    const btn=el('button','Practise this technique');btn.addEventListener('click',()=>{
+      practiceTopic=topic;practiceStep=0;practiceAnswer=null;practiceHint=false;practiceReason='';
+      show('practice');
+    });card.append(btn);
+  }
+  return card;
+}
+function renderDetail({a,q,id}){
+  const box=$('detail');box.replaceChildren();
+  box.append(el('span',a.date+' · Question '+q.number+' · '+(q.time_seconds??'?')+'s','badge'),el('h2',q.prompt||q.header||'Question'),el('p',q.topic||'Topic not captured','muted'));
+  if(q.questionImage){
+    const d=el('div',undefined,'question-image');d.append(picture(q.questionImage,'Question diagram'));box.append(d);
+  }
+  box.append(renderReflection(id));
+  const isRevealed=revealed.has(id);
+  const button=el('button',isRevealed?'Answer revealed':'Reveal Atom answer and explanation','reveal-button');
+  if(isRevealed){button.disabled=true;}
+  else button.addEventListener('click',()=>{revealed.add(id);renderDetail({a,q,id});});
+  box.append(button);
+  if(q.answers.length){
+    const opts=el('div',undefined,'options');
+    q.answers.forEach(answer=>{
+      const d=el('div',undefined,'option '+(isRevealed&&answer.correct?'right ':'')+(answer.selected?'chosen':''));
+      d.append(el('b',answer.letter),el('small',answer.selected?'the learner chose this':''),el('small',isRevealed&&answer.correct?'Atom’s correct answer':'',isRevealed&&answer.correct?'correct':''));
+      (answer.images||[]).forEach(u=>d.append(picture(u,'Option '+answer.letter)));
+      opts.append(d);
+    });box.append(opts);
+  }
+  if(isRevealed&&q.explanation){
+    const d=el('details');
+    d.open=true;d.append(el('summary','Atom’s original explanation — cleaned for reading'),renderExplanation(q.explanation));
+    const used=new Set([q.questionImage,...q.answers.flatMap(a=>a.images||[])]);
+    for(const i of q.images||[]){
+      if(i.src&&i.src.includes('/questions/')&&!used.has(i.src)){
+        const panel=el('div',undefined,'question-image');panel.append(picture(i.src,'Explanation diagram'));
+        d.append(panel);used.add(i.src);
+      }
+    }box.append(d);
+  }
+  if(!q.details_captured)box.append(el('p','Some answer details were not captured. This does not mean the question was left unanswered.','missing'));
+  if(isRevealed){const technique=skillCard(q.topic);if(technique)box.append(technique);}
+  const bookmark=el('button',notes[id]?.bookmarked?'★ Bookmarked':'☆ Bookmark','small-button');
+  bookmark.addEventListener('click',()=>{storeNote(id,{...notes[id],bookmarked:!notes[id]?.bookmarked});renderQuestions();});
+  box.append(bookmark);
+  const label=el('label','Parent’s review notes','note-label');const area=el('textarea');
+  area.placeholder='For example: understood rotation but missed the second rule.';
+  area.value=notes[id]?.text||'';area.maxLength=5000;
+  area.addEventListener('input',()=>storeNote(id,{...notes[id],text:area.value}));
+  label.append(area);box.append(label);
+}
+function renderCoach(){
+  const insight=$('coaching-insights'),queue=$('coaching-queue'),observations=$('coaching-observations');
+  insight.replaceChildren();queue.replaceChildren();observations.replaceChildren();
+  if(!activities.length){insight.append(el('p','Load private assessment data to see evidence-based priorities.'));return;}
+  const s=reviewInsights(activities,notes);
+  insight.append(el('p','Based on '+(s.correct+s.wrong)+' captured question results; '+s.details+' have full answer details. Topic labels are available for only some questions. These are observed results, not proof of why the learner chose an answer.','muted'));
+  const cards=el('div',undefined,'insight-cards');
+  for(const [value,label] of [[s.wrong,'Incorrect responses'],[s.slowWrong,'Incorrect taking 60s+'],[s.reviewed,'Family reflections recorded']]){
+    const card=el('div',undefined,'insight-card');card.append(el('b',String(value)),el('span',label));cards.append(card);
+  }
+  insight.append(cards);
+  const t=el('div',undefined,'topic-insights');
+  for(const stat of s.topicRows){
+    const entry=el('div',undefined,'topic-insight');
+    entry.append(el('b',stat.topic),el('span',stat.correct+'/'+(stat.correct+stat.wrong)+' correct · '+stat.accuracy+'% · '+stat.count+' with topic labels · '+stat.details+' with explanations'));
+    const track=el('div',undefined,'accuracy-track'),bar=el('div',undefined,'accuracy-bar');bar.style.width=stat.accuracy+'%';track.append(bar);entry.append(track);
+    if(SKILLS[stat.topic] && stat.count>=8 && stat.accuracy<65){
+      const button=el('button','See technique','text-button');
+      button.addEventListener('click',()=>{practiceTopic=stat.topic;practiceStep=0;practiceAnswer=null;show('practice');});
+      entry.append(button);
+    }
+    t.append(entry);
+  }insight.append(t);
+  if(s.priorities.length){
+    insight.append(el('p','Suggested teaching focus: '+s.priorities.map(x=>x.topic).join(', ')+'. These are lower-scoring captured topics with at least eight labelled questions; reassess on fresh work.','coach-emphasis'));
+  }
+  queue.append(el('h3','Questions to review together'),el('p','Prioritised by incorrect answers, long responses and available explanation data. Long times can include pauses; these are not judgements about speed.','muted'));
+  for(const item of s.queue.slice(0,8)){
+    const button=el('button',undefined,'review-queue-item');
+    button.append(el('b',item.date+' · '+item.title+' · Q'+item.number),el('span',item.topic+' · '+(item.seconds??'?')+'s'+(item.correct===false?' · Incorrect':'')));
+    button.addEventListener('click',()=>{
+      $('activity').value=item.activityId;$('filter').value='all';selected=item.id;show('questions');renderQuestions();
+    });queue.append(button);
+  }
+  observations.append(el('h3','What the learner says during review'));
+  if(!s.reviewed)observations.append(el('p','No explanations have been recorded yet. Open a question, ask the learner to describe his thinking, and tag any difficulty only after listening.','muted'));
+  else {
+    observations.append(el('p',String(s.reviewed)+' questions have recorded family observations. These are user-entered, not inferred.','muted'));
+    if(s.barriers.length)for(const row of s.barriers)observations.append(el('p',row.name.replaceAll('_',' ')+' · '+row.count));
+  }
+  observations.append(el('p','A wrong answer could reflect a misunderstanding, guessing, a slip, fatigue or distraction. Compare spoken reasoning with later independent attempts before reaching a conclusion.','fine-print'));
+}
+function renderPractice(){
+  const lessons=$('practice-lessons'),quiz=$('practice-question');
+  lessons.replaceChildren();quiz.replaceChildren();
+  const topics=[...new Set(PRACTICE_ITEMS.map(q=>q.topic))];
+  for(const topic of topics){
+    const skill=SKILLS[topic],qs=PRACTICE_ITEMS.filter(q=>q.topic===topic);
+    const attempts=qs.reduce((n,q)=>n+(notes['practice::'+q.id]?.attempts||0),0);
+    const correct=qs.reduce((n,q)=>n+(notes['practice::'+q.id]?.successes||0),0);
+    const btn=el('button',undefined,'lesson-tile'+(practiceTopic===topic?' selected-lesson':''));
+    btn.append(el('b',skill.name),el('small',skill.idea),el('small',attempts?correct+'/'+attempts+' correct on attempts':'Not practised yet'));
+    btn.addEventListener('click',()=>{practiceTopic=topic;practiceStep=0;practiceAnswer=null;practiceHint=false;practiceReason='';renderPractice();});
+    lessons.append(btn);
+  }
+  const skill=SKILLS[practiceTopic],qs=PRACTICE_ITEMS.filter(q=>q.topic===practiceTopic);
+  if(!qs.length)return;
+  const question=qs[practiceStep%qs.length];
+  const panel=el('section',undefined,'skill-card');
+  panel.append(el('p','Step '+(practiceStep%qs.length+1)+' of '+qs.length+' · Original practice question','eyebrow'),
+    el('h3',skill.name),el('p',skill.idea));
+  const ol=el('ol');for(const step of skill.steps)ol.append(el('li',step));panel.append(ol);
+  panel.append(el('p','Question: '+question.prompt,'practice-prompt'));
+  const explain=el('label','Explain your choice aloud or write a sentence (optional)','note-label');
+  const textArea=el('textarea');textArea.rows=2;textArea.maxLength=5000;
+  textArea.placeholder='My rule is…';
+  textArea.value=practiceReason;
+  textArea.disabled=practiceAnswer!==null;
+  textArea.addEventListener('input',()=>{practiceReason=textArea.value;});
+  explain.append(textArea);panel.append(explain);
+  const answers=el('div',undefined,'practice-options');
+  question.options.forEach((option,i)=>{
+    const btn=el('button',option,'practice-option'+(practiceAnswer===i?(i===question.answer?' option-correct':' option-wrong'):''));
+    btn.disabled=practiceAnswer!==null;
+    btn.addEventListener('click',()=>{
+      if(practiceAnswer!==null)return;
+      practiceAnswer=i;
+      const key='practice::'+question.id;const old=notes[key]||{};
+      storeNote(key,{...old,bookmarked:false,text:practiceReason,
+        attempts:(old.attempts||0)+1,successes:(old.successes||0)+(i===question.answer?1:0)});
+      renderPractice();
+    });answers.append(btn);
+  });panel.append(answers);
+  if(practiceAnswer===null){
+    const hint=el('button',practiceHint?'Hint shown':'Show a hint','small-button');
+    hint.addEventListener('click',()=>{practiceHint=true;renderPractice();});panel.append(hint);
+    if(practiceHint)panel.append(el('p',question.hint,'hint'));
+  }else{
+    panel.append(el('p',practiceAnswer===question.answer?'Correct. Now explain WHY it works.':'Not yet. Check the rule and have another go on a similar example.','practice-result'));
+    if(practiceAnswer!==question.answer)panel.append(el('p','Correct choice: '+question.options[question.answer],'coach-emphasis'));
+    panel.append(el('p',question.why));
+    panel.append(el('p','Transfer away from the screen: '+skill.transfer,'muted'));
+    const next=el('button',practiceStep%qs.length===qs.length-1?'Repeat this skill':'Next question','reveal-button');
+    next.addEventListener('click',()=>{practiceStep++;practiceAnswer=null;practiceHint=false;practiceReason='';renderPractice();});panel.append(next);
+  }
+  quiz.append(panel);
+}
+
 function table(headers,rows){const wrap=el('div',undefined,'table-wrap'),t=el('table'),head=el('thead'),tr=el('tr');headers.forEach(h=>tr.append(el('th',h)));head.append(tr);t.append(head);const body=el('tbody');rows.forEach(row=>{const tr=el('tr');row.forEach(v=>tr.append(el('td',v)));body.append(tr);});t.append(body);wrap.append(t);return wrap;}
 function progress(){$('history').replaceChildren(table(['Date','Activity','Accuracy','Total time'],[...activities].sort((a,b)=>parseDate(a.date).localeCompare(parseDate(b.date))).map(a=>[a.date,a.title,score(a),a.total_time_display||'Unavailable'])));$('topics').replaceChildren(table(['Topic','Captured questions','Correct','Median time'],topics(activities).map(t=>[t.topic,t.count,`${t.correct}/${t.count}`,t.median===null?'Unavailable':`${t.median}s`])));$('topics').append(el('p','Topic statistics use only questions with captured topic labels; coverage is incomplete.','muted'));}
-function render(){metrics();$('activity').replaceChildren(new Option('All activities','all'),...activities.map(a=>new Option(`${a.date} · ${a.title}`,a.id)));renderActivities();renderQuestions();progress();}
+function render(){metrics();$('activity').replaceChildren(new Option('All activities','all'),...activities.map(a=>new Option(`${a.date} · ${a.title}`,a.id)));renderActivities();renderQuestions();progress();renderCoach();renderPractice();}
 $('search').addEventListener('input',renderActivities);$('activity').addEventListener('change',()=>{selected=null;renderQuestions();});$('filter').addEventListener('change',renderQuestions);
 $('import').addEventListener('change',async e=>{try{const f=e.target.files[0];if(!f)return;if(f.size>30*1024*1024)throw new Error('Import file is too large.');const data=JSON.parse(await f.text());const next=normalize(data);activities=next;assetMap={};selected=null;render();$('message').textContent+=' Imported data is held for this session; it is not uploaded.';}catch(error){$('message').textContent=`Import failed: ${error.message}`;}finally{e.target.value='';}});
 $('export').addEventListener('click',()=>{const blob=new Blob([JSON.stringify({version:1,notes},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=el('a');a.href=url;a.download='nvr-review-notes.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
