@@ -67,7 +67,7 @@ async function loadPrivateActivities(){
   const response=await privateFetch('activities');
   if(!response.ok){
     const data=await response.json().catch(()=>({}));
-    throw Error(data.error||'Private dataset is unavailable (HTTP '+response.status+').');
+    throw Error(data.error||(response.status===404?'The private NVR data service is not active yet. The public interface is available, but secure data loading is temporarily unavailable.':'Private dataset is unavailable (HTTP '+response.status+').'));
   }
   const data=await response.json();
   if(!data.ok||!Array.isArray(data.activities))throw Error('The private dataset response was invalid.');
@@ -77,6 +77,7 @@ async function loadPrivateActivities(){
 }
 async function loadCloudNotes(){
   const response=await privateFetch('notes');
+  if(response.status===404){notes={};return;} // Older App Monitor Worker lacks this new route.
   if(!response.ok)throw Error('Could not load private notes.');
   const data=await response.json();
   if(!data.ok||!data.notes||typeof data.notes!=='object')throw Error('Invalid private notes response.');
