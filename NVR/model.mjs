@@ -194,7 +194,7 @@ export function reviewInsights(activities, notes={}) {
   reviewCandidates.sort((a,b)=>b.rank-a.rank || (parseDate(b.date)||'').localeCompare(parseDate(a.date)||'') || a.number-b.number);
   return {correct,wrong,withTime,slow,slowWrong,reviewed,details,topicRows,priorities,
     barriers:[...barrierCounts].sort((a,b)=>b[1]-a[1]).map(([name,count])=>({name,count})),
-    queue:reviewCandidates.slice(0,12)};
+    sequenceProfile:sequenceRuleProfile(activities),queue:reviewCandidates.slice(0,12)};
 }
 
 
@@ -256,4 +256,19 @@ export function unpackPrivateNotes(payload) {
     }
   }
   return result;
+}
+
+
+/** Detect whether a saved Atom sequence explanation describes one or several linking rules. */
+export function sequenceRuleProfile(activities){
+  const groups={single:{right:0,wrong:0},multi:{right:0,wrong:0}};
+  for(const activity of activities)for(const q of activity.questions){
+    if(q.topic!=='Sequences'||typeof q.explanation!=='string'||typeof q.correct!=='boolean')continue;
+    const matches=[...q.explanation.matchAll(/Linking Element\s*(\d+)\s*:/gi)].map(m=>Number(m[1]));
+    const number=matches.length?Math.max(...matches):/Linking Element\s*:/i.test(q.explanation)?1:0;
+    if(!number)continue;
+    const row=number>=2?groups.multi:groups.single;
+    row[q.correct?'right':'wrong']++;
+  }
+  return groups;
 }

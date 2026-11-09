@@ -48,3 +48,18 @@
 .practice-option.option-wrong{background:#663340;border-color:var(--red)}
 .practice-result{font-weight:700;color:var(--mint)}.hint{color:var(--amber)}
 @media(max-width:760px){.review-fields,.topic-insights,.lesson-grid{grid-template-columns:1fr}.insight-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.practice-options{grid-template-columns:1fr}.review-queue-item{flex-direction:column;align-items:flex-start;gap:3px}.coach-question,.skill-card{padding:15px}}
+
+.interactive-net-lab,.interactive-rotation-lab{padding:16px;margin:18px 0 22px;border:1px solid var(--line);border-radius:12px;background:#172539}
+.interactive-net-lab h4,.interactive-rotation-lab h4{font-size:16px;margin:0}
+.interactive-net-lab svg{display:block;width:min(100%,330px);height:auto;margin:12px auto}
+.interactive-net-lab p{margin:8px 0}
+.rotation-stage{display:grid;place-items:center;height:205px;perspective:600px;overflow:hidden}
+.demo-cube{position:relative;width:100px;height:100px;transform-style:preserve-3d;transition:transform .45s ease}
+.demo-face{position:absolute;width:100px;height:100px;display:grid;place-items:center;border:2px solid #314762;color:#16253a;font-size:14px;font-weight:750;backface-visibility:visible}
+.demo-face.front{background:#c7e9f8;transform:translateZ(50px)}
+.demo-face.back{background:#c7e9f8;transform:rotateY(180deg) translateZ(50px)}
+.demo-face.left{background:#fbe3c4;transform:rotateY(-90deg) translateZ(50px)}
+.demo-face.right{background:#fbe3c4;transform:rotateY(90deg) translateZ(50px)}
+.demo-face.top{background:#ded7fa;transform:rotateX(90deg) translateZ(50px)}
+.demo-face.bottom{background:#ded7fa;transform:rotateX(-90deg) translateZ(50px)}
+@media(prefers-reduced-motion:reduce){.demo-cube{transition:none}}

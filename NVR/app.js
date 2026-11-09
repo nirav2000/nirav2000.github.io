@@ -7,7 +7,7 @@ const access=$('accessGate'),review=$('reviewMain'),signin=$('signInBtn'),signou
 const loginMessage=$('loginMessage'),cloudStatus=$('cloudStatus'),saveBtn=$('saveNotes'),appActions=$('appActions');
 const auth=IS_LOCAL?null:window.AppsPasskeyAuth?.create({baseUrl:API,sessionStoreKey:SESSION_STORE});
 let activities=[],assetMap={},selected=null,notes={},noteTimer=null,notesDirty=false,savingNotes=false,sessionReady=false;
-let revealed=new Set(),practiceTopic='Nets and Cubes',practiceStep=0,practiceAnswer=null,practiceHint=false,practiceReason='';
+let revealed=new Set(),practiceTopic='Nets and Cubes',practiceStep=0,practiceAnswer=null,practiceHint=false,practiceReason='',netPairsVisible=false,demoRotation=0;
 const objectUrls=new Map(),pendingAssets=new Map();
 if(IS_LOCAL){try{notes=JSON.parse(localStorage.getItem(KEY)||'{}');if(!notes||typeof notes!=='object')notes={};}catch{notes={};}}
 const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
@@ -286,6 +286,16 @@ function renderCoach(){
   if(s.priorities.length){
     insight.append(el('p','Suggested teaching focus: '+s.priorities.map(x=>x.topic).join(', ')+'. These are lower-scoring captured topics with at least eight labelled questions; reassess on fresh work.','coach-emphasis'));
   }
+  const sequences=s.sequenceProfile;
+  const totalMulti=sequences.multi.right+sequences.multi.wrong;
+  const totalSingle=sequences.single.right+sequences.single.wrong;
+  if(totalMulti>=4&&totalSingle>=4){
+    insight.append(el('h3','A specific pattern worth testing: combining sequence rules'),
+      el('p','In the captured sequence questions, '+sequences.multi.wrong+'/'+totalMulti+
+        ' questions with two or more linking rules were incorrect, compared with '+
+        sequences.single.wrong+'/'+totalSingle+' questions with one linking rule.','coach-emphasis'),
+      el('p','This groups questions by rules described in Atom’s explanation. It does NOT show which rule the learner missed. These questions may differ in difficulty; use fresh examples and the learner’s verbal explanation to test the hypothesis.','fine-print'));
+  }
   queue.append(el('h3','Questions to review together'),el('p','Prioritised by incorrect answers, long responses and available explanation data. Long times can include pauses; these are not judgements about speed.','muted'));
   for(const item of s.queue.slice(0,8)){
     const button=el('button',undefined,'review-queue-item');
@@ -302,6 +312,57 @@ function renderCoach(){
   }
   observations.append(el('p','A wrong answer could reflect a misunderstanding, guessing, a slip, fatigue or distraction. Compare spoken reasoning with later independent attempts before reaching a conclusion.','fine-print'));
 }
+
+function renderNetLab(){
+  const wrap=el('section',undefined,'interactive-net-lab');
+  wrap.append(el('h4','Explore an original cube net'),el('p','These six squares make one cube. Which faces are opposite when it folds?','muted'));
+  const ns='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 276 210');
+  svg.setAttribute('role','img');svg.setAttribute('aria-label','Cube net: Top above Front, Bottom below Front, and Left, Front, Right, Back across the middle');
+  const faces=[
+    {x:1,y:0,label:'Top',fill:'#e5dcf5'},
+    {x:0,y:1,label:'Left',fill:'#fae7c9'},
+    {x:1,y:1,label:'Front',fill:'#d5edf4'},
+    {x:2,y:1,label:'Right',fill:'#fae7c9'},
+    {x:3,y:1,label:'Back',fill:'#d5edf4'},
+    {x:1,y:2,label:'Bottom',fill:'#e5dcf5'}
+  ];
+  for(const face of faces){
+    const rect=document.createElementNS(ns,'rect');
+    rect.setAttribute('x',String(face.x*65+8));rect.setAttribute('y',String(face.y*65+8));
+    rect.setAttribute('width','65');rect.setAttribute('height','65');
+    rect.setAttribute('rx','3');rect.setAttribute('fill',face.fill);
+    rect.setAttribute('stroke','#263247');rect.setAttribute('stroke-width','2');
+    svg.append(rect);
+    const label=document.createElementNS(ns,'text');
+    label.setAttribute('x',String(face.x*65+40.5));
+    label.setAttribute('y',String(face.y*65+44));
+    label.setAttribute('font-size','12');label.setAttribute('fill','#1e2b3c');
+    label.setAttribute('font-weight','650');label.setAttribute('text-anchor','middle');
+    label.textContent=face.label;svg.append(label);
+  }
+  wrap.append(svg);
+  const button=el('button',netPairsVisible?'Hide opposite pairs':'Reveal opposite pairs','small-button');
+  button.addEventListener('click',()=>{netPairsVisible=!netPairsVisible;renderPractice();});wrap.append(button);
+  if(netPairsVisible)wrap.append(el('p','Opposite pairs: Top ↔ Bottom; Left ↔ Right; Front ↔ Back. Opposite faces never touch along an edge.','skill-check'));
+  return wrap;
+}
+function renderRotationLab(){
+  const wrap=el('section',undefined,'interactive-rotation-lab');
+  wrap.append(el('h4','Explore a rotating cube'),
+    el('p','Turn the cube. Its faces change what you can see, but none of its faces or neighbours disappear.','muted'));
+  const stage=el('div',undefined,'rotation-stage');
+  const cube=el('div',undefined,'demo-cube');
+  const names=['front','back','left','right','top','bottom'];
+  for(const name of names)cube.append(el('div',name,'demo-face '+name));
+  cube.style.transform='rotateX(-23deg) rotateY('+demoRotation+'deg)';
+  stage.append(cube);wrap.append(stage);
+  const button=el('button','Turn 90°','small-button');
+  button.addEventListener('click',()=>{demoRotation=(demoRotation+90)%360;cube.style.transform='rotateX(-23deg) rotateY('+demoRotation+'deg)';});
+  wrap.append(button,el('p','Notice: even when a face is hidden, it is still there. Next, try this rule with joined blocks.','fine-print'));
+  return wrap;
+}
+
 function renderPractice(){
   const lessons=$('practice-lessons'),quiz=$('practice-question');
   lessons.replaceChildren();quiz.replaceChildren();
@@ -322,6 +383,8 @@ function renderPractice(){
   panel.append(el('p','Step '+(practiceStep%qs.length+1)+' of '+qs.length+' · Original practice question','eyebrow'),
     el('h3',skill.name),el('p',skill.idea));
   const ol=el('ol');for(const step of skill.steps)ol.append(el('li',step));panel.append(ol);
+  if(practiceTopic==='Nets and Cubes')panel.append(renderNetLab());
+  if(practiceTopic==='Rotating 3D Shapes')panel.append(renderRotationLab());
   panel.append(el('p','Question: '+question.prompt,'practice-prompt'));
   const explain=el('label','Explain your choice aloud or write a sentence (optional)','note-label');
   const textArea=el('textarea');textArea.rows=2;textArea.maxLength=5000;
