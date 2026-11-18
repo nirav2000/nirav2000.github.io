@@ -166,6 +166,7 @@ function renderHome() {
  ${appliances.length===0?quickStartMarkup():''}
  ${needsArchive?`<section class="backup-nudge"><div class="backup-nudge-icon">${ico('alert')}</div><div><strong>A fresh backup is due</strong><p>Keep a copy outside the app, in case your device is ever lost.</p></div><button class="btn btn-line btn-sm" data-action="settings">Back up ${ico('arrow')}</button></section>`:''}
  <p class="note-muted warranty-footnote">Coverage dates are estimates based on your entries. Always check the terms of your warranty.</p>`;
+ if(searchTerm.trim())document.querySelector('.home-utility')?.classList.add('wallet-show-search');
  renderGrid();
 }
 
@@ -950,9 +951,11 @@ async function deleteAccount(id){
 
 async function handleAction(button) {
  const action=button.dataset.action,id=button.dataset.id;
+ document.getElementById('wallet-menu')?.removeAttribute('open');
  if(action.startsWith('cloud-')){window.WarrantyCloud?.handle(action,id);return;}
  switch(action){
  case 'home':closeModal(true);renderHome();break;
+ case 'search':closeModal(true);renderHome();document.querySelector('.home-utility')?.classList.add('wallet-show-search');document.getElementById('app-search')?.focus();break;
  case 'settings':closeModal(true);renderSettings();break;
  case 'notes':closeModal(true);renderFollowUps();break;
  case 'followup-filter':followUpFilter=['open','done','archived'].includes(button.dataset.filter)?button.dataset.filter:'open';renderFollowUps();break;
