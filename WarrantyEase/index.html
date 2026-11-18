@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="improvements.css">
   <link rel="stylesheet" href="media.css">
   <link rel="stylesheet" href="followups.css">
+  <link rel="stylesheet" href="wallet.css">
   <title>Warranty Ease | Your home, covered.</title>
 </head>
 <body>
@@ -38,6 +39,17 @@
         <span class="local-pill"><span class="local-dot"></span> Available offline</span>
         <button class="btn btn-dark btn-top-add" data-action="new"><span class="btn-icon">+</span> Add appliance</button>
       </div>
+      <details class="wallet-menu" id="wallet-menu">
+        <summary aria-label="More: products, search, notes, website logins and backup" title="More options">&#8943;</summary>
+        <div class="wallet-menu-panel" aria-label="More options">
+          <button type="button" data-action="home">Products</button>
+          <button type="button" data-action="search">Search products</button>
+          <button type="button" data-action="notes">Notes &amp; follow-ups</button>
+          <button type="button" data-action="logins">Website logins</button>
+          <button type="button" data-action="settings">Backup &amp; privacy</button>
+          <button type="button" data-action="new">Add appliance</button>
+        </div>
+      </details>
     </header>
 
     <main id="main" class="main" aria-live="polite"></main>
