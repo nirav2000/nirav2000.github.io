@@ -22,6 +22,8 @@ let currentView = 'home';
 let editor = null;
 let detailId = null;
 let claim = null;
+let followUpEditor = null;
+let followUpFilter = 'open';
 let modalKind = null;
 let ocrQueue = [];
 let ocrWorking = false;
@@ -144,7 +146,7 @@ async function deleteRecord(id) {await dbAction('readwrite',store=>store.delete(
 function getRecord(id) {return appliances.find(r=>r.id===id);}
 
 function setNavState() {
- document.querySelectorAll('[data-action="home"], [data-action="settings"], [data-action="logins"]').forEach(el=>el.classList.toggle('active',el.dataset.action===currentView));
+ document.querySelectorAll('[data-action="home"], [data-action="notes"], [data-action="settings"], [data-action="logins"]').forEach(el=>el.classList.toggle('active',el.dataset.action===currentView));
 }
 function renderHome() {
  currentView='home';setNavState();clearUrls('main');
@@ -159,12 +161,77 @@ function renderHome() {
  <div id="we-cloud-banner">${window.WarrantyCloud?.banner?.()||''}</div>
   <section class="home-utility"><div class="search-wrap home-search">${ico('search')}<input id="app-search" type="search" class="search-input" placeholder="Search appliances, models or serial numbers" aria-label="Search appliances" value="${esc(searchTerm)}"></div><div class="mini-count"><span class="count-big">${appliances.length}</span> saved <span class="count-sep">·</span> ${covered} with active cover dates</div></section>
  <section class="help-strip"><span class="help-icon">${ico('shield')}</span><div><strong>Need to make a warranty claim?</strong><p>Choose an appliance below to find your serial number, receipt and contact details.</p></div>${ico('arrow','help-arrow')}</section>
+ ${window.WarrantyFollowUpsUI?.home?.(appliances,{today:today(),esc,ico,fdate})||''}
  <section class="list-section"><div class="section-head"><div><h2>My appliances</h2><p>${appliances.length?'Tap any appliance for details and documents.':'Start by saving a receipt or model number.'}</p></div></div><div id="appliance-list"></div></section>
  ${appliances.length===0?quickStartMarkup():''}
  ${needsArchive?`<section class="backup-nudge"><div class="backup-nudge-icon">${ico('alert')}</div><div><strong>A fresh backup is due</strong><p>Keep a copy outside the app, in case your device is ever lost.</p></div><button class="btn btn-line btn-sm" data-action="settings">Back up ${ico('arrow')}</button></section>`:''}
  <p class="note-muted warranty-footnote">Coverage dates are estimates based on your entries. Always check the terms of your warranty.</p>`;
  renderGrid();
 }
+
+function renderFollowUps(){
+ currentView='notes';setNavState();clearUrls('main');
+ root.innerHTML=window.WarrantyFollowUpsUI?.page?.(appliances,{today:today(),esc,ico,fdate},followUpFilter)||
+   '<p>Notes are unavailable until the app update finishes installing. Reload to try again.</p>';
+}
+function openFollowUpEditor(recordId='',noteId=''){
+ if(!appliances.length){toast('Add an appliance before creating a follow-up.');return;}
+ if(!window.WarrantyFollowUps?.save||!window.WarrantyFollowUpsUI?.editor){toast('Notes are unavailable. Reload the app to update.');return;}
+ const selected=getRecord(recordId)||appliances[0];
+ const existing=noteId?window.WarrantyFollowUps.listOf(selected.followUps).find(n=>n.id===noteId):null;
+ if(noteId&&!existing){toast('This note has changed. Reopen the appliance.');return;}
+ const origin=modalKind==='detail'?'detail':currentView;
+ followUpEditor={recordId:selected.id,noteId:noteId||'',origin};
+ modalKind='followup';clearUrls('modal');
+ modalRoot.innerHTML=window.WarrantyFollowUpsUI.editor(appliances,selected,existing,{today:today(),esc,ico,fdate});
+ document.body.style.overflow='hidden';
+ document.getElementById('we-followup-title')?.focus();
+}
+function updateRecordFollowUps(recordId,transform){
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction(DB_STORE,'readwrite'),store=tx.objectStore(DB_STORE),req=store.get(recordId);
+  let failure=null;
+  req.onsuccess=()=>{
+   try{
+    const record=req.result;
+    if(!record)throw Error('Appliance is missing on this device.');
+    record.followUps=transform(record.followUps||[]);
+    record.updatedAt=new Date().toISOString();
+    store.put(record);
+   }catch(error){failure=error;try{tx.abort()}catch{}}
+  };
+  tx.oncomplete=()=>resolve(true);
+  tx.onerror=()=>reject(failure||tx.error||Error('Follow-up could not be saved.'));
+  tx.onabort=()=>reject(failure||tx.error||Error('Follow-up change was interrupted.'));
+ });
+}
+async function saveFollowUp(){
+ if(!followUpEditor)return;
+ const recordId=document.getElementById('we-followup-appliance')?.value||followUpEditor.recordId;
+ const fields={title:document.getElementById('we-followup-title')?.value||'',
+  dueDate:document.getElementById('we-followup-date')?.value||'',
+  details:document.getElementById('we-followup-details')?.value||''};
+ if(!fields.title.trim()){toast('Write a note or action first.');document.getElementById('we-followup-title')?.focus();return;}
+ const {origin,noteId}=followUpEditor;
+ try{
+  await updateRecordFollowUps(recordId,items=>window.WarrantyFollowUps.save(items,fields,{id:noteId,makeId:uid}));
+  await refresh();window.WarrantyCloud?.scheduleUpload?.();
+  closeModal(true);
+  if(origin==='detail')showDetail(recordId);else if(origin==='notes')renderFollowUps();else renderHome();
+  toast('Saved with this appliance. Include it in your next encrypted cloud backup.');
+ }catch(e){toast(e.message||'Could not save follow-up.');}
+}
+async function changeFollowUpStatus(recordId,noteId,status){
+ if(!getRecord(recordId)||!noteId)return;
+ if(status==='archived'&&!window.confirm('Archive this follow-up? It remains available under Archived.'))return;
+ try{
+  await updateRecordFollowUps(recordId,items=>window.WarrantyFollowUps.setStatus(items,noteId,status));
+  await refresh();window.WarrantyCloud?.scheduleUpload?.();
+  if(modalKind==='detail')showDetail(recordId);else if(currentView==='notes')renderFollowUps();else renderHome();
+  toast(status==='done'?'Follow-up completed.':status==='open'?'Follow-up reopened.':'Follow-up archived.');
+ }catch(e){toast(e.message||'Could not update this follow-up.');}
+}
+
 function quickStartMarkup() {return `<aside class="quick-start"><div class="quick-header"><h3>Get started with your recent purchases</h3><span>Models only: you can add the serials and receipts when ready.</span></div><div class="quick-list">${templates.map((t,i)=>`<div class="quick-item"><div><strong>${esc(t.brand)} ${esc(t.productName)}</strong><span>${esc(t.model)}</span></div><button data-action="quick-add" data-template="${i}" aria-label="Add ${esc(t.productName)}">+</button></div>`).join('')}</div></aside>`;}
 function renderGrid() {
  const list=document.getElementById('appliance-list');if(!list)return;
@@ -334,7 +401,7 @@ async function saveEditor() {
 }
 function closeModal(force=false) {
  if(!force && editor?.dirty && !window.confirm('Discard changes that have not been saved?'))return;
- editor=null;detailId=null;claim=null;accountEditor=null;pendingExportZip=null;pendingImportEntries=null;modalKind=null;clearUrls('modal');modalRoot.innerHTML='';document.body.style.overflow='';
+ editor=null;detailId=null;claim=null;followUpEditor=null;accountEditor=null;pendingExportZip=null;pendingImportEntries=null;modalKind=null;clearUrls('modal');modalRoot.innerHTML='';document.body.style.overflow='';
 }
 
 function infoCell(label,value,copyable=false) {
@@ -367,6 +434,7 @@ function showDetail(id) {
  <div class="detail-block"><h3>Purchase</h3><div class="detail-grid">${infoCell('Seller',r.retailer)}${infoCell('Purchase date',r.purchaseDate?fdate(r.purchaseDate):'')}${infoCell('Order / invoice',r.orderNumber,true)}${infoCell('Price',r.price?`GBP ${r.price}`:'')}</div></div>
  <div class="detail-block"><h3>Warranty & registration</h3><div class="detail-grid">${infoCell('Warranty provider',r.warrantyProvider||r.brand)}${infoCell('Cover end date',computedExpiry(r)?fdate(computedExpiry(r)):'')}${infoCell('Date registered',r.registrationDate?fdate(r.registrationDate):'')}${infoCell('Registered by',r.registrationMethod)}${infoCell('Registration reference',r.registrationReference,true)}${infoCell('Warranty start',r.warrantyStart?fdate(r.warrantyStart):'')}${infoCell('Warranty period entered',window.WarrantyMedia?.chooseWarrantyLabel?.(r.durationMonths)||'')}</div></div>
  ${r.warrantyNotes?`<div class="detail-block"><h3>Coverage notes</h3><p class="detail-notes">${esc(r.warrantyNotes)}</p></div>`:''}
+ ${window.WarrantyFollowUpsUI?.detail?.(r,{today:today(),esc,ico,fdate})||''}
  ${r.websiteAccountId?`<div class="detail-block"><h3>Registration website login</h3><button class="link-chip" data-action="open-linked-account" data-id="${esc(r.websiteAccountId)}">${ico('key')} ${esc(websiteAccounts.find(a=>a.id===r.websiteAccountId)?.brand||'Website account')} &middot; Open protected login</button></div>`:''}
   <div class="detail-block"><h3>Manufacturer manuals, warranties &amp; updates</h3>${resourceLinksSection(r)}</div>
   <div class="detail-block"><h3>Manufacturer support</h3>${detailLinks(r,'support')}</div>
@@ -739,7 +807,7 @@ function mergeRestoredRecord(incoming,local){
    files.set(otherId,{...f,id:otherId,name:'Local copy - '+f.name});
   }
  }
- return {...(newerLocal?local:incoming),files:[...files.values()]};
+ return {...(newerLocal?local:incoming),files:[...files.values()],followUps:window.WarrantyFollowUps?.merge?.(incoming.followUps,local.followUps)||[...(incoming.followUps||[]),...(local.followUps||[])]};
 }
 
 async function applyRestoredZip(zip){
@@ -886,6 +954,14 @@ async function handleAction(button) {
  switch(action){
  case 'home':closeModal(true);renderHome();break;
  case 'settings':closeModal(true);renderSettings();break;
+ case 'notes':closeModal(true);renderFollowUps();break;
+ case 'followup-filter':followUpFilter=['open','done','archived'].includes(button.dataset.filter)?button.dataset.filter:'open';renderFollowUps();break;
+ case 'followup-new':openFollowUpEditor(id);break;
+ case 'followup-edit':openFollowUpEditor(id,button.dataset.noteId);break;
+ case 'followup-save':await saveFollowUp();break;
+ case 'followup-cancel':{const back=followUpEditor?.origin==='detail'?followUpEditor.recordId:'';closeModal(true);if(back)showDetail(back);else if(currentView==='notes')renderFollowUps();else renderHome();break;}
+ case 'followup-toggle':await changeFollowUpStatus(id,button.dataset.noteId,button.dataset.status==='done'?'done':'open');break;
+ case 'followup-archive':await changeFollowUpStatus(id,button.dataset.noteId,'archived');break;
  case 'logins':closeModal(true);renderLogins();break;
  case 'vault-create':await createVault();break;
  case 'vault-unlock':await unlockVault();break;

@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="improvements.css">
   <link rel="stylesheet" href="media.css">
+  <link rel="stylesheet" href="followups.css">
   <title>Warranty Ease | Your home, covered.</title>
 </head>
 <body>
@@ -29,6 +30,7 @@
       </a>
       <nav class="header-nav" aria-label="Main">
         <button class="nav-link active" data-action="home">My appliances</button>
+        <button class="nav-link" data-action="notes">Notes &amp; follow-ups</button>
         <button class="nav-link" data-action="logins">Website logins</button>
         <button class="nav-link" data-action="settings">Backup & privacy</button>
       </nav>
@@ -43,6 +45,7 @@
   </div>
   <nav class="mobile-nav" aria-label="Mobile navigation">
     <button data-action="home" class="mobile-nav-item active"><span data-icon="home"></span>Home</button>
+    <button data-action="notes" class="mobile-nav-item"><span data-icon="calendar"></span>Notes</button>
     <button data-action="new" class="mobile-nav-add" aria-label="Add appliance"><span class="nav-add-symbol">+</span><span class="mobile-add-label">Add</span></button>
     <button data-action="logins" class="mobile-nav-item"><span data-icon="lock"></span>Logins</button>
     <button data-action="settings" class="mobile-nav-item"><span data-icon="settings"></span>Backup</button>
@@ -58,6 +61,8 @@
   <script src="media.js" defer></script>
   <script src="resources.js" defer></script>
   <script src="cloud-chunks.js" defer></script>
+  <script src="followups.js" defer></script>
+  <script src="followups-ui.js" defer></script>
   <script src="app.js" defer></script>
   <script src="cloud.js" defer></script>
   <script src="platform.js" defer></script>
