@@ -93,11 +93,19 @@ function isCovered(r) {const expiry=computedExpiry(r);return !!(expiry && expiry
 function hasReceipt(r) {return !!(r.files||[]).find(f=>f.type==='receipt');}
 function isReady(r) {return !!(r.model&&r.serial&&r.purchaseDate&&hasReceipt(r));}
 function missingBits(r) {const missing=[];if(!r.serial)missing.push('serial');if(!r.purchaseDate)missing.push('purchase date');if(!hasReceipt(r))missing.push('receipt');return missing;}
-function newRecord(initial={}) {const now=new Date().toISOString();return {id:uid(),productName:'',category:'',brand:'',model:'',productCode:'',serial:'',purchaseDate:'',retailer:'',orderNumber:'',price:'',warrantyStart:'',durationMonths:'',expiryDate:'',registrationDate:'',registrationMethod:'',registrationReference:'',warrantyProvider:'',warrantyNotes:'',supportEmail:'',supportPhone:'',supportUrl:'',sellerEmail:'',sellerPhone:'',sellerUrl:'',websiteAccountId:'',files:[],createdAt:now,updatedAt:now,...initial};}
+function newRecord(initial={}) {const now=new Date().toISOString();return {id:uid(),productName:'',category:'',brand:'',model:'',productCode:'',serial:'',purchaseDate:'',retailer:'',orderNumber:'',price:'',warrantyStart:'',durationMonths:'',expiryDate:'',registrationDate:'',registrationMethod:'',registrationReference:'',warrantyProvider:'',warrantyNotes:'',supportEmail:'',supportPhone:'',supportUrl:'',sellerEmail:'',sellerPhone:'',sellerUrl:'',websiteAccountId:'',displayPhoto:'installed',productUrl:'',manualUrl:'',warrantyTermsUrl:'',softwareUpdatesUrl:'',files:[],createdAt:now,updatedAt:now,...initial};}
 function fmtSize(size) {return size<1024*1024?`${Math.max(1,Math.round(size/1024))} KB`:`${(size/1024/1024).toFixed(1)} MB`;}
-function fileLabel(type) {return {device:'Appliance photo',label:'Model / serial label',receipt:'Purchase proof',warranty:'Warranty document',other:'Other evidence'}[type]||'Evidence';}
+function fileLabel(type) {return {device:'Installed appliance photo',reference:'Product reference photo',label:'Model / serial label',receipt:'Purchase proof',warranty:'Warranty document',other:'Other evidence'}[type]||'Evidence';}
 function cardIcon(category='') {if(/tv|entertainment|screen/i.test(category))return ico('tv','card-art');if(/laundry|wash|dryer/i.test(category))return ico('washing','card-art');if(/kitchen|oven|dishwash|fridge/i.test(category))return ico('kitchen','card-art');return ico('appliance','card-art');}
-function previewUrl(blob,scope) {const url=URL.createObjectURL(blob);urls[scope].push(url);return url;}
+function preferredPicture(record){
+ const pics=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&window.WarrantyMedia?.isBlob?.(f.blob));
+ const choice=record.displayPhoto==='reference'?['reference','device']:['device','reference'];
+ return choice.map(type=>pics.find(f=>f.type===type)).find(Boolean)||null;
+}
+function mediaBlob(file){return window.WarrantyMedia?.imageBlob?.(file)|| (file?.blob instanceof Blob&&file.blob.size?file.blob:null);}
+function previewUrl(blob,scope) {if(!(blob instanceof Blob)||blob.size===0)return '';const url=URL.createObjectURL(blob);urls[scope].push(url);return url;}
+function missingImageNotice(record){const all=(record.files||[]).filter(f=>f.type==='device'||f.type==='reference');return all.some(f=>f.mime?.startsWith('image/')&&!window.WarrantyMedia?.isBlob?.(f.blob));}
+
 function clearUrls(scope) {urls[scope].forEach(x=>URL.revokeObjectURL(x));urls[scope]=[];}
 function errorToast(text) {toast(text);}
 let toastHandle=null;
@@ -108,6 +116,28 @@ function safeEmail(value) {return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value||'')?v
 function openDB() {return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,2);request.onupgradeneeded=()=>{const database=request.result;for(const store of [DB_STORE,ACCOUNTS_STORE,META_STORE])if(!database.objectStoreNames.contains(store))database.createObjectStore(store,{keyPath:'id'});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);request.onblocked=()=>reject(new Error('Storage upgrade is blocked by another tab'));});}
 function storeAction(storeName,mode,callback) {return new Promise((resolve,reject)=>{const tx=db.transaction(storeName,mode);const store=tx.objectStore(storeName);let request;try{request=callback(store);}catch(e){reject(e);return;}tx.oncomplete=()=>resolve(request?.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Storage was interrupted'));});}
 function dbAction(mode,callback){return storeAction(DB_STORE,mode,callback);}
+// Read, merge, and write within ONE IndexedDB transaction to prevent OCR and
+// thumbnail generation from overwriting each other's changes.
+function patchStoredFile(recordId,fileId,changes){return new Promise((resolve,reject)=>{
+ const tx=db.transaction(DB_STORE,'readwrite'),store=tx.objectStore(DB_STORE),req=store.get(recordId);
+ req.onsuccess=()=>{const row=req.result,attached=row?.files?.find(f=>f.id===fileId);
+  if(attached){Object.assign(attached,changes);row.updatedAt=new Date().toISOString();store.put(row);}
+ };
+ tx.oncomplete=()=>resolve(true);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Attachment update could not finish'));
+ });}
+async function prepareDisplayImages(recordId,files){
+ for(const f of files){
+  if(!f.mime.startsWith('image/')||!window.WarrantyMedia?.createPreview)continue;
+  try{
+   const preview=await window.WarrantyMedia.createPreview(f.blob,{type:f.type});if(!preview)continue;
+   await patchStoredFile(recordId,f.id,{previewBlob:preview});
+   if(editor?.draft.id===recordId){const current=editor.draft.files.find(x=>x.id===f.id);if(current)current.previewBlob=preview;}
+   await refresh();
+   if(currentView==='home'&&!modalKind)renderGrid(); // Avoid re-rendering a form while someone is typing.
+  }catch(e){console.warn('Original preserved, display preview unavailable:',e?.name||'unsupported-image');}
+ }
+}
+
 async function refresh() {appliances=await dbAction('readonly',store=>store.getAll());appliances.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));websiteAccounts=await storeAction(ACCOUNTS_STORE,'readonly',store=>store.getAll());websiteAccounts.sort((a,b)=>String(a.brand).localeCompare(String(b.brand)));vaultMeta=await storeAction(META_STORE,'readonly',store=>store.get('vault'))||null;const last=await storeAction(META_STORE,'readonly',store=>store.get('lastBackup'));lastBackupAt=last?.at||null;}
 async function putRecord(record) {record.updatedAt=new Date().toISOString();await dbAction('readwrite',store=>store.put(record));await refresh();window.WarrantyCloud?.scheduleUpload?.();}
 async function deleteRecord(id) {await dbAction('readwrite',store=>store.delete(id));await refresh();window.WarrantyCloud?.scheduleUpload?.();}
@@ -138,16 +168,17 @@ function renderHome() {
 function quickStartMarkup() {return `<aside class="quick-start"><div class="quick-header"><h3>Get started with your recent purchases</h3><span>Models only: you can add the serials and receipts when ready.</span></div><div class="quick-list">${templates.map((t,i)=>`<div class="quick-item"><div><strong>${esc(t.brand)} ${esc(t.productName)}</strong><span>${esc(t.model)}</span></div><button data-action="quick-add" data-template="${i}" aria-label="Add ${esc(t.productName)}">+</button></div>`).join('')}</div></aside>`;}
 function renderGrid() {
  const list=document.getElementById('appliance-list');if(!list)return;
- clearUrls('main');const filtered=appliances.filter(r=>[r.productName,r.brand,r.model,r.serial,r.retailer,r.category,...(r.files||[]).map(f=>f.ocrText||'')].join(' ').toLowerCase().includes(searchTerm.trim().toLowerCase()));
- if(!appliances.length){list.innerHTML=`<div class="empty-state compact-empty"><div class="empty-art">${ico('box')}</div><h3>All your warranties. One place.</h3><p>Start with a photo of the appliance or its receipt. Add details whenever you have them.</p><button class="btn btn-dark" data-action="new">${ico('camera')} Add your first appliance</button></div>`;return;}
- if(!filtered.length){list.innerHTML=`<div class="no-results">No appliances match your search.</div>`;return;}
+ clearUrls('main');
+ const filtered=appliances.filter(r=>[r.productName,r.brand,r.model,r.serial,r.retailer,r.category,...(r.files||[]).map(f=>f.ocrText||'')].join(' ').toLowerCase().includes(searchTerm.trim().toLowerCase()));
+ if(!appliances.length){list.innerHTML=`<div class="empty-state compact-empty"><div class="empty-art">${ico('box')}</div><h3>All your warranties. One place.</h3><p>Add the appliance as it is installed, then add a receipt or model reference picture.</p><button class="btn btn-dark" data-action="new">${ico('camera')} Add your first appliance</button></div>`;return;}
+ if(!filtered.length){list.innerHTML='<div class="no-results">No appliances match your search.</div>';return;}
  list.innerHTML=`<div class="appliance-grid">${filtered.map(r=>{
- const pic=(r.files||[]).find(f=>f.type==='device'&&f.mime?.startsWith('image/'))||(r.files||[]).find(f=>f.mime?.startsWith('image/'));
- const image=pic?`<img loading="lazy" alt="${esc(r.productName||r.model||'Appliance')}" src="${previewUrl(pic.blob,'main')}">`:cardIcon(r.category);
- const status=isExpired(r)?['expired','Ended']:isReady(r)?['ready','Ready to claim']:['','Add details'];
- const expiry=computedExpiry(r);
- const meta=expiry?`${isExpired(r)?'Ended':'Cover until'} ${fdate(expiry)}`:missingBits(r).length?`Add ${missingBits(r).slice(0,2).join(' and ')}`:'Add warranty date';
- return `<article class="appliance-card"><button class="appliance-open" data-action="view" data-id="${esc(r.id)}" aria-label="Open ${esc(r.productName||r.brand||'appliance')} warranty details"><div class="card-image">${image}</div><div class="card-copy"><span class="card-kicker">${esc(r.brand||r.category||'Appliance')}</span><h3 class="card-title">${esc(r.productName||r.model||'Appliance')}</h3><p class="card-model">${esc(r.model||'Model not yet added')}</p><div class="card-bottom"><span class="warranty-line">${esc(meta)}</span><span class="status-bubble ${status[0]}">${status[1]}</span></div></div>${ico('arrow','card-chevron')}</button></article>`;
+  const photo=preferredPicture(r),blob=mediaBlob(photo);
+  const image=blob?`<img loading="lazy" decoding="async" data-warranty-photo="true" alt="${esc(r.productName||r.model||'Appliance')}" src="${previewUrl(blob,'main')}">`:cardIcon(r.category);
+  const exp=computedExpiry(r),label=window.WarrantyMedia?.chooseWarrantyLabel?.(r.durationMonths)||'';
+  const evidence=isReady(r)?'Evidence complete':'Evidence to add';
+  const expiry=exp?fdate(exp):'Not recorded';
+  return `<article class="appliance-card"><button class="appliance-open" data-action="view" data-id="${esc(r.id)}" aria-label="Open ${esc(r.productName||r.brand||'appliance')} warranty details"><div class="card-image">${image}${label?`<span class="we-warranty-badge" title="Period entered by you, not independently verified">${esc(label)}</span>`:''}${!blob&&missingImageNotice(r)?`<span class="we-photo-warning">Photo unavailable locally</span>`:''}</div><div class="card-copy"><span class="card-kicker">${esc(r.brand||r.category||'Appliance')}</span><h3 class="card-title">${esc(r.productName||r.model||'Appliance')}</h3><p class="card-model we-card-model">${esc(r.model||'Model not yet recorded')}</p><div class="we-expiry-line"><span>${exp?(isExpired(r)?'Warranty ended':'Warranty expires'):'Warranty expiry'}</span><strong class="${isExpired(r)?'we-expired-text':''}">${esc(expiry)}</strong></div><div class="we-evidence-status">${ico(isReady(r)?'checkcircle':'info')} ${esc(evidence)}${photo?` · ${esc(photo.type==='reference'?'Reference photo':'Installed photo')}`:''}</div></div>${ico('arrow','card-chevron')}</button></article>`;
  }).join('')}</div>`;
 }
 function renderSettings() {
@@ -158,12 +189,14 @@ function renderSettings() {
  <section class="settings-card settings-full"><h3>Shared Apps monitoring</h3><p class="note-muted">The shared Auth, PWA and developer-only Version Lab use our Apps platform. Optional App Monitor and Firebase usage statistics count app activity and encrypted backup index operations only; no receipt images, serial numbers, OCR text or website passwords are sent.</p><label class="we-consent-control"><input type="checkbox" id="we-monitor-consent" ${window.WarrantyPlatform?.enabled?.()?'checked':''}> Enable shared App Monitor and Firebase usage logging on this device</label></section>
  <section class="settings-card"><div class="settings-icon">${ico('download')}</div><h3>Save a portable encrypted archive</h3><p>Back up every record, serial label, photo, receipt, warranty file and encrypted website login. The ZIP includes an independent offline recovery page you can use even if this app vanishes.</p><button class="btn btn-dark" data-action="backup">${ico('lock')} Create encrypted archive</button><p class="note-muted">${appliances.length} appliance record${appliances.length===1?'':'s'} + ${websiteAccounts.length} website login${websiteAccounts.length===1?'':'s'}. Save a copy on another device or drive.</p><button class="btn btn-ghost btn-sm" data-action="backup-plain">Export readable ZIP (unencrypted)</button></section>
  <section class="settings-card"><div class="settings-icon">${ico('upload')}</div><h3>Recover from an archive</h3><p>Import a previous encrypted or readable Warranty Ease ZIP. This also restores the website-login vault, so retain its separate passphrase.</p><button class="btn btn-line" data-action="restore">${ico('upload')} Choose backup ZIP</button><p class="note-muted">An encrypted backup can also be recovered using the RECOVER.html inside the archive, without this app.</p></section>
- <section class="settings-card"><div class="settings-icon">${ico('shield')}</div><h3>Keep records on this device</h3><p>Original appliance photos and receipts stay in your device database. Once you connect encrypted cloud backup, copies are encrypted locally and sent to your private Cloudflare storage. Check the sync status before relying on another device.</p><button class="btn btn-line" data-action="persist">Request persistent storage</button><p class="note-muted" id="storage-info">Checking available space...</p></section>
+ <section class="settings-card"><div class="settings-icon">${ico('shield')}</div><h3>Keep records on this device</h3><p>Original appliance photos and receipts stay in your device database. Once you connect encrypted cloud backup, copies are encrypted locally and sent to your private Cloudflare storage. Check the sync status before relying on another device.</p><button class="btn btn-line" data-action="persist">Request persistent storage</button><p class="note-muted" id="storage-info">Checking available space...</p><p class="we-storage-audit" id="we-storage-audit" role="status">Checking original photo files...</p></section>
  <section class="settings-card"><div class="settings-icon">${ico('key')}</div><h3>Warranty website logins</h3><p>Keep website URLs and encrypted sign-in details together. One LG account can be shared by both LG appliances. You must unlock the vault to read credentials.</p><button class="btn btn-line" data-action="logins">${ico('lock')} Manage website logins</button><p class="note-muted">${websiteAccounts.length} protected website account${websiteAccounts.length===1?'':'s'} on this device.</p></section>
  <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Photo text recognition</h3><p>Model-label and receipt photos are scanned automatically on your device, including offline once the scanner assets have been cached.</p><p class="note-muted">The original photo stays saved. Nothing extracted is filled into your fields until you approve it. Use Scan again for difficult photos; clear, close-up images work best.</p><button class="btn btn-line btn-sm" data-action="ocr-offline-prepare">Prepare scanner for offline use</button><p class="note-muted" id="ocr-offline-status">Optional one-time download. After preparation, scanning works without an internet connection.</p></section>
  <section class="settings-card settings-full"><h3>Protect your records for years</h3><ul class="privacy-list"><li>This installed app retains local copies in its browser database, and its interface can open offline after first load. Browser storage can still be removed, especially after long periods of non-use.</li><li>Make an encrypted, portable archive after each change. Store two copies in different safe locations (for example your computer and a separate backup drive).</li><li>Save the archive passphrase and login-vault passphrase somewhere you can retrieve them. These passphrases cannot be reset from the server.</li><li>Never place receipts, serial labels or passwords in a public code repository. Encrypted cloud backups can be enabled with your existing account; check the current sync status before relying on them.</li><li>The app prepares claims but never sends website passwords or submits emails automatically.</li></ul><div class="warning-note">Cloud backup is optional and depends on Firebase and Cloudflare being available. The installed device and exported recovery archives remain your independent copies.</div></section>
  </div>`;
- updateStorageEstimate();
+  updateStorageEstimate();
+  const files=appliances.flatMap(r=>r.files||[]),audit=window.WarrantyMedia?.inspect?.(files);
+  const note=document.getElementById('we-storage-audit');if(note&&audit)note.textContent=`${audit.originals} original files stored locally (${fmtSize(audit.bytes)}). ${audit.previews} compact previews. ${audit.missing?audit.missing+' missing originals — do not delete any backups; restore affected evidence.':'No missing originals detected in saved records.'}`;
 }
 async function updateStorageEstimate() {
  const box=document.getElementById('storage-info');if(!box)return;
@@ -181,7 +214,8 @@ function formField(label,name,placeholder='',options={}) {
  return `<div class="field${full}${mobile}"><label for="field-${name}">${esc(label)}</label>${control}${hint}</div>`;
 }
 function uploadBox(type,title,desc,accept='image/*') {
- return `<div class="upload-box"><div><div style="color:#75a480">${ico(type==='receipt'||type==='warranty'?'file':'camera')}</div><div class="upload-title">${esc(title)}</div><p>${esc(desc)}</p></div><div class="upload-buttons"><label>${ico('camera')} Take photo<input hidden type="file" accept="image/*" capture="environment" data-file-type="${type}"></label><label>${ico('upload')} Upload<input hidden type="file" accept="${accept}" data-file-type="${type}" multiple></label></div></div>`;
+ const camera=type==='reference'?'':`<label>${ico('camera')} Take photo<input hidden type="file" accept="image/*" capture="environment" data-file-type="${type}"></label>`;
+ return `<div class="upload-box"><div><div style="color:#63719d">${ico(type==='receipt'||type==='warranty'?'file':'camera')}</div><div class="upload-title">${esc(title)}</div><p>${esc(desc)}</p></div><div class="upload-buttons">${camera}<label>${ico('upload')} Upload<input hidden type="file" accept="${accept}" data-file-type="${type}" multiple></label></div></div>`;
 }
 function filesMarkup(types) {
  const files=editor.draft.files.filter(f=>types.includes(f.type));
@@ -189,9 +223,10 @@ function filesMarkup(types) {
  return `<div class="file-items">${files.map(f=>fileRow(f,true)).join('')}</div>`;
 }
 function fileRow(f,editable=false) {
- const isImage=f.mime?.startsWith('image/');
- const thumb=isImage?`<img src="${previewUrl(f.blob,'modal')}" alt="">`:ico('file');
- return `<div class="file-row"><div class="file-thumb">${thumb}</div><div class="file-data"><strong title="${esc(f.name)}">${esc(f.name)}</strong><span>${esc(fileLabel(f.type))} &middot; ${fmtSize(f.size||f.blob?.size||0)}${f.ocrText?' &middot; Text scanned':''}</span></div><div class="file-actions"><button class="tiny-btn" data-action="file-view" data-file="${esc(f.id)}" aria-label="View file">View</button>${editable&&isImage?`<button class="tiny-btn scan-btn" data-action="file-scan" data-file="${esc(f.id)}">${f.ocrText?'Scan again':'Read text'}</button><button class="tiny-btn scan-btn" data-action="file-crop" data-file="${esc(f.id)}">Crop &amp; scan</button>`:''}${editable?`<button class="tiny-btn warn" data-action="file-remove" data-file="${esc(f.id)}" aria-label="Remove file">${ico('trash')}</button>`:''}</div></div>`;
+ const isImage=f.mime?.startsWith('image/'),original=window.WarrantyMedia?.isBlob?.(f.blob);
+ const preview=isImage?mediaBlob(f):null;
+ const thumb=preview?`<img data-warranty-photo="true" src="${previewUrl(preview,'modal')}" alt="">`:ico(original?'file':'alert');
+ return `<div class="file-row"><div class="file-thumb">${thumb}</div><div class="file-data"><strong title="${esc(f.name)}">${esc(f.name)}</strong><span>${esc(fileLabel(f.type))} &middot; ${original?fmtSize(f.blob.size):'Original unavailable'}${f.ocrText?' &middot; Text scanned':''}</span>${!original?`<span class="we-photo-warning">Restore from an encrypted backup if available</span>`:''}</div><div class="file-actions"><button class="tiny-btn" data-action="file-view" data-file="${esc(f.id)}" aria-label="View file" ${original?'':'disabled'}>View</button>${editable&&original&&isImage?`<button class="tiny-btn scan-btn" data-action="file-scan" data-file="${esc(f.id)}">${f.ocrText?'Scan again':'Read text'}</button><button class="tiny-btn scan-btn" data-action="file-crop" data-file="${esc(f.id)}">Crop &amp; scan</button>`:''}${editable?`<button class="tiny-btn warn" data-action="file-remove" data-file="${esc(f.id)}" aria-label="Remove file">${ico('trash')}</button>`:''}</div></div>`;
 }
 function stepMarkup() {return `<div class="stepper">${['Appliance','Purchase','Warranty'].map((s,i)=>`<div class="step ${editor.step===i?'active':i<editor.step?'done':''}"><div class="step-num">${i<editor.step?ico('check'):i+1}</div><span>${s}</span></div>`).join('')}</div>`;}
 function editorStepContent() {
@@ -203,7 +238,7 @@ function editorStepContent() {
  ${formField('Model number','model','e.g. F4Y511WWLA1')}
  ${formField('Serial number','serial','Exactly as printed',{full:true,hint:'The serial is specific to your individual appliance. It is different from the model.'})}
   ${formField('Product code (optional)','productCode','e.g. RH98Y15PBNP.AGWAPUK',{full:true,hint:'Different from the model or serial; often shown on the manufacturer label.'})}</div>
- <div class="form-divider"></div><div class="upload-grid">${uploadBox('device','Appliance photo','A quick photo so you can recognise the appliance.')}${uploadBox('label','Model / serial label','Photograph the label. Text is read on this device; confirm any suggested model or serial number.')}</div>${filesMarkup(['device','label'])}${ocrNote()}`;
+ <div class="form-divider"></div><div class="upload-grid">${uploadBox('device','Installed appliance photo','Keep a photo of your actual installed appliance.')}${uploadBox('reference','Optional catalogue photo','Save a manufacturer product picture to your iPad and attach it here. This does not replace the real installed photo.')}${uploadBox('label','Model / serial label','Photograph the label. Text is read on this device; confirm any suggested model or serial number.')}</div>${filesMarkup(['device','reference','label'])}${formField('Card picture preference','displayPhoto','',{choices:['installed','reference'],full:true,hint:'Installed photo is kept separately from a manufacturer product picture.'})}${ocrNote()}`;
  if(step===1)return `<div class="section-intro"><h3>Where and when did you buy it?</h3><p>Keep proof of purchase here so it is easy to find later.</p></div><div class="upload-grid" style="grid-template-columns:1fr">${uploadBox('receipt','Receipt or order confirmation','Receipt photos are read automatically; saved emails (.eml/.txt) can also suggest purchase details. PDFs are stored as evidence.','image/*,.pdf,.eml,.txt')}</div>${filesMarkup(['receipt'])}${ocrNote()}
  <div class="form-divider"></div><div class="form-grid">
  ${formField('Purchased from','retailer','e.g. AO, Marks Electrical')}
@@ -229,7 +264,8 @@ function editorStepContent() {
  ${formField('Seller email','sellerEmail','e.g. customer.services@...',{type:'email'})}
  ${formField('Seller phone','sellerPhone','',{type:'tel'})}
  ${formField('Seller support page','sellerUrl','',{full:true})}</div></div>
- ${formField('Coverage and notes','warrantyNotes','What is included, any registration conditions, exclusions or useful contact notes.',{textarea:true,full:true})}
+  <div class="subsection"><h4>Keep official reference links</h4><p class="mini-help">Links help locate future updates and manufacturer files. Download PDFs separately and attach them below to preserve a dated copy for disputes.</p><div class="form-grid">${formField('Product and product pictures','productUrl','https://...', {full:true})}${formField('User manual / documentation','manualUrl','https://...', {full:true})}${formField('Warranty terms URL','warrantyTermsUrl','https://...', {full:true})}${formField('Software / product updates','softwareUpdatesUrl','https://...', {full:true})}</div></div>
+  ${formField('Coverage and notes','warrantyNotes','What is included, any registration conditions, exclusions or useful contact notes.',{textarea:true,full:true})}
  <div class="form-divider"></div><div class="upload-grid" style="grid-template-columns:1fr">${uploadBox('warranty','Warranty certificate / registration proof','Attach the terms, certificate or confirmation email, if available. New images are scanned for useful label details.','image/*,.pdf,.eml,.txt')}</div>${filesMarkup(['warranty'])}${ocrNote()}
  <div class="tip-box">${ico('shield')} This app organises your evidence but does not verify a manufacturer's warranty terms or replace your statutory consumer rights.</div>`;
 }
@@ -289,23 +325,31 @@ function detailLinks(record,prefix) {
  if(!email&&!phone&&!website)return `<p class="note-muted">No contact details saved yet. You can add them in Edit.</p>`;
  return `<div class="link-row">${safeEmail(email)?`<a class="link-chip" href="mailto:${encodeURIComponent(email)}">${ico('mail')} ${esc(email)}</a>`:''}${phone?`<a class="link-chip" href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${ico('phone')} ${esc(phone)}</a>`:''}${website?`<a class="link-chip" href="${esc(website)}" target="_blank" rel="noopener noreferrer">${ico('external')} Support website</a>`:''}</div>`;
 }
+function resourceLinksSection(record){
+ const builtIn=window.WarrantyResources?.officialLinks?.(record)||[];
+ const userLinks=[['product','Product page / pictures',record.productUrl],['manual','Manual / documentation',record.manualUrl],['warranty','Saved warranty policy URL',record.warrantyTermsUrl],['updates','Software and product updates',record.softwareUpdatesUrl]].filter(([, ,url])=>url).map(([kind,title,url])=>({kind,title,url,source:'saved by you'}));
+ const unique=new Map();for(const link of [...userLinks,...builtIn]){const url=window.WarrantyResources?.allowedUrl?.(link.url)||safeHttp(link.url);if(url&&!unique.has(url))unique.set(url,{...link,url});}
+ if(!unique.size)return '<p class="note-muted">No manufacturer links available for this model. Add product, terms or manual links in Edit.</p>';
+ return `<div class="we-resource-links">${[...unique.values()].map(link=>`<a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer" class="we-resource-link">${ico('external')} <span><strong>${esc(link.title)}</strong><small>${link.source==='manufacturer'?'Manufacturer webpage — check current version':'Link saved by you'}</small></span></a>`).join('')}</div><p class="note-muted">External pages may change. Download the original PDF and attach it to this appliance for a durable claim record; opening a link does not preserve a copy.</p>`;
+}
 function showDetail(id) {
  const r=getRecord(id);if(!r)return;
  editor=null;claim=null;detailId=id;modalKind='detail';clearUrls('modal');
- const pic=(r.files||[]).find(f=>f.type==='device'&&f.mime?.startsWith('image/'))||(r.files||[]).find(f=>f.mime?.startsWith('image/'));
- const img=pic?`<img src="${previewUrl(pic.blob,'modal')}" alt="${esc(r.productName)}">`:cardIcon(r.category);
+ const pic=preferredPicture(r),photo=mediaBlob(pic);
+  const img=photo?`<img data-warranty-photo="true" src="${previewUrl(photo,'modal')}" alt="${esc(r.productName)}">`:cardIcon(r.category);
  modalRoot.innerHTML=`<div class="modal-overlay"><section class="modal modal-narrow" role="dialog" aria-modal="true" aria-label="Appliance details">
  <div class="modal-header"><div><span class="modal-label">${esc(r.category||'Home appliance')}</span><h2>${esc(r.productName||r.brand||r.model||'Appliance')}</h2><p>${esc([r.brand,r.model].filter(Boolean).join(' / ')||'Complete your details whenever you can')}</p></div><button class="close-btn" data-action="close" aria-label="Close">${ico('close')}</button></div>
  <div class="modal-content"><div class="details-cover">${img}<span class="status-bubble ${isExpired(r)?'expired':isReady(r)?'ready':''}">${isExpired(r)?'Warranty ended':isReady(r)?'Claim-ready':'Needs details'}</span></div>
  ${missingBits(r).length?`<div class="claim-intro"><strong>To make a future claim easier:</strong> Add ${esc(missingBits(r).join(', '))}.</div>`:''}
  <div class="detail-block"><h3>Device identification</h3><div class="detail-grid">${infoCell('Brand',r.brand)}${infoCell('Model number',r.model,true)}${infoCell('Serial number',r.serial,true)}${infoCell('Product code',r.productCode,true)}${infoCell('Category',r.category)}</div></div>
  <div class="detail-block"><h3>Purchase</h3><div class="detail-grid">${infoCell('Seller',r.retailer)}${infoCell('Purchase date',r.purchaseDate?fdate(r.purchaseDate):'')}${infoCell('Order / invoice',r.orderNumber,true)}${infoCell('Price',r.price?`GBP ${r.price}`:'')}</div></div>
- <div class="detail-block"><h3>Warranty & registration</h3><div class="detail-grid">${infoCell('Warranty provider',r.warrantyProvider||r.brand)}${infoCell('Cover end date',computedExpiry(r)?fdate(computedExpiry(r)):'')}${infoCell('Date registered',r.registrationDate?fdate(r.registrationDate):'')}${infoCell('Registered by',r.registrationMethod)}${infoCell('Registration reference',r.registrationReference,true)}${infoCell('Warranty start',r.warrantyStart?fdate(r.warrantyStart):'')}</div></div>
+ <div class="detail-block"><h3>Warranty & registration</h3><div class="detail-grid">${infoCell('Warranty provider',r.warrantyProvider||r.brand)}${infoCell('Cover end date',computedExpiry(r)?fdate(computedExpiry(r)):'')}${infoCell('Date registered',r.registrationDate?fdate(r.registrationDate):'')}${infoCell('Registered by',r.registrationMethod)}${infoCell('Registration reference',r.registrationReference,true)}${infoCell('Warranty start',r.warrantyStart?fdate(r.warrantyStart):'')}${infoCell('Warranty period entered',window.WarrantyMedia?.chooseWarrantyLabel?.(r.durationMonths)||'')}</div></div>
  ${r.warrantyNotes?`<div class="detail-block"><h3>Coverage notes</h3><p class="detail-notes">${esc(r.warrantyNotes)}</p></div>`:''}
  ${r.websiteAccountId?`<div class="detail-block"><h3>Registration website login</h3><button class="link-chip" data-action="open-linked-account" data-id="${esc(r.websiteAccountId)}">${ico('key')} ${esc(websiteAccounts.find(a=>a.id===r.websiteAccountId)?.brand||'Website account')} &middot; Open protected login</button></div>`:''}
- <div class="detail-block"><h3>Manufacturer support</h3>${detailLinks(r,'support')}</div>
+  <div class="detail-block"><h3>Manufacturer manuals, warranties &amp; updates</h3>${resourceLinksSection(r)}</div>
+  <div class="detail-block"><h3>Manufacturer support</h3>${detailLinks(r,'support')}</div>
  <div class="detail-block"><h3>Seller support</h3>${detailLinks(r,'seller')}</div>
- <div class="detail-block"><h3>Saved evidence (${(r.files||[]).length})</h3>${(r.files||[]).length?`<div class="detail-files">${r.files.map(f=>fileRow(f)).join('')}</div>`:`<p class="note-muted">No receipt or photos uploaded yet.</p>`}</div>
+ <div class="detail-block"><h3>Original photos and evidence (${(r.files||[]).length})</h3>${(r.files||[]).length?`<div class="detail-files">${r.files.map(f=>fileRow(f)).join('')}</div>`:`<p class="note-muted">No receipt or photos uploaded yet.</p>`}</div>
  <button class="btn btn-ghost btn-sm" data-action="delete-record" data-id="${esc(r.id)}">${ico('trash')} Delete record</button>
  </div><div class="modal-footer"><div class="footer-left"><button class="btn btn-line" data-action="edit" data-id="${esc(r.id)}">${ico('edit')} Edit details</button></div><div class="footer-right"><button class="btn btn-dark" data-action="claim" data-id="${esc(r.id)}">${ico('mail')} Prepare claim</button></div></div>
  </section></div>`;
@@ -397,7 +441,7 @@ async function handlePickedFiles(input) {
  if(!files.length)return;
  const loaded=[];
  for(const file of files){
-  if(file.size>30*1024*1024){toast(`${file.name} is over the 30 MB per-file limit.`);continue;}
+  if(file.size>60*1024*1024){toast(`${file.name} exceeds the 60 MB safety limit. Keep the original externally and import a smaller still-legible copy.`);continue;}
   const attach={id:uid(),name:file.name||`${type}-${Date.now()}.jpg`,type,mime:file.type||'application/octet-stream',size:file.size,blob:file,ocrText:'',addedAt:new Date().toISOString()};
   editor.draft.files.push(attach);loaded.push(attach);
  }
@@ -406,7 +450,8 @@ async function handlePickedFiles(input) {
   await dbAction('readwrite',store=>store.put(editor.draft));
   await refresh();window.WarrantyCloud?.scheduleUpload?.();
  }
- editor.dirty=true;renderEditor(false);toast(`${loaded.length} original file${loaded.length===1?'':'s'} saved on this device. Review extracted details, then save the appliance.`);
+  editor.dirty=true;renderEditor(false);toast(`${loaded.length} original file${loaded.length===1?'':'s'} saved on this device. Review extracted details, then save the appliance.`);
+  void prepareDisplayImages(editor.draft.id,loaded); // Derived previews never replace original evidence.
  if(type==='receipt'){
   for(const f of loaded.filter(f=>/\.(eml|txt)$/i.test(f.name)||/^(text\/plain|message\/rfc822)/i.test(f.mime))){
    try{
@@ -461,14 +506,13 @@ async function runOcrQueue() {
       freshEditor.dirty=true;
       // Persist OCR analysis and the unmodified photo immediately, even if the editor closes.
       freshEditor.draft.updatedAt=new Date().toISOString();
-      await dbAction('readwrite',store=>store.put(freshEditor.draft));
+      await patchStoredFile(work.editorId,work.fileId,{ocrText:text,ocrSuggestions:hits,ocrKeyLines:file.ocrKeyLines,ocrAt:file.ocrAt});
       await refresh();window.WarrantyCloud?.scheduleUpload?.();
     } else {
       // Record may have been saved and editor closed while scanning. Keep its OCR text
       // and suggestions in the original stored file; NEVER auto-fill product fields.
-      const latest=await dbAction('readonly',store=>store.get(work.editorId));
-      const target=latest?.files?.find(f=>f.id===work.fileId);
-      if(target){target.ocrText=text;target.ocrSuggestions=hits;target.ocrKeyLines=file.ocrKeyLines;target.ocrAt=file.ocrAt;await putRecord(latest);}
+      await patchStoredFile(work.editorId,work.fileId,{ocrText:text,ocrSuggestions:hits,ocrKeyLines:file.ocrKeyLines,ocrAt:file.ocrAt});
+      await refresh();window.WarrantyCloud?.scheduleUpload?.();
     }
     const message=count?`Found ${count} possible detail${count===1?'':'s'}. Check the original image and tap Use suggested details.`:'Scan finished. No clear details detected. Try a sharper, closer photo or enter the details manually.';
     ocrMessage=message;
@@ -583,7 +627,7 @@ async function createRawBackupZip(){
  let readable='WARRANTY EASE - APPLIANCE INDEX\nExported: '+manifest.exportedAt+'\n\n';
  for(const r of appliances){
   const clone={...r,files:[]};
-  for(const f of r.files||[]){const path=`files/${r.id}/${f.id}_${safeFileName(f.name)}`;items.push({name:path,data:f.blob});const {blob,...meta}=f;clone.files.push({...meta,path});}
+  for(const f of r.files||[]){const path=`files/${r.id}/${f.id}_${safeFileName(f.name)}`;items.push({name:path,data:f.blob});if(!(f.blob instanceof Blob)||!f.blob.size)throw Error('Missing original evidence file '+f.name+'. Cloud backup stopped before falsely marking a complete copy.');const {blob,previewBlob,...meta}=f;clone.files.push({...meta,path});}
   manifest.records.push(clone);
   readable+=`${r.productName||'Appliance'} (${r.brand||'-'})\nModel: ${r.model||'-'}\nSerial: ${r.serial||'-'}\nProduct code: ${r.productCode||'-'}\nPurchased: ${r.purchaseDate||'-'} from ${r.retailer||'-'}\nInvoice/order: ${r.orderNumber||'-'}\nWarranty end (check actual terms): ${computedExpiry(r)||'-'}\nRegistration: ${r.registrationDate||'-'} | ${r.registrationMethod||'-'} | ${r.registrationReference||'-'}\nManufacturer support: ${r.supportEmail||'-'} | ${r.supportPhone||'-'} | ${r.supportUrl||'-'}\nSeller support: ${r.sellerEmail||'-'} | ${r.sellerPhone||'-'} | ${r.sellerUrl||'-'}\nLinked login: ${websiteAccounts.find(a=>a.id===r.websiteAccountId)?.brand||'none'} (credentials held encrypted in backup JSON)\nFiles: ${(r.files||[]).map(f=>f.name).join(', ')||'-'}\n\n`;
  }
@@ -657,6 +701,25 @@ async function restoreEncryptedBackup(){
   pendingImportEntries=null;
  }catch(e){console.error(e);toast(e.name==='OperationError'?'Incorrect archive passphrase or damaged backup.':`Restore failed: ${e.message||'Invalid backup'}`);}
 }
+function mergeRestoredRecord(incoming,local){
+ if(!local)return incoming;
+ const newerLocal=Date.parse(local.updatedAt||'')>Date.parse(incoming.updatedAt||'');
+ const files=new Map((incoming.files||[]).map(f=>[f.id,f]));
+ for(const f of local.files||[]){
+  const remote=files.get(f.id);
+  if(!remote){files.set(f.id,f);continue;}
+  const localOriginal=f.blob instanceof Blob&&f.blob.size>0;
+  const remoteOriginal=remote.blob instanceof Blob&&remote.blob.size>0;
+  if(localOriginal&&!remoteOriginal){files.set(f.id,f);continue;}
+  if(localOriginal&&remoteOriginal&&f.blob.size!==remote.blob.size){
+   // Never discard different physical evidence in an ID collision during restore.
+   let otherId=f.id+'-device';while(files.has(otherId))otherId+='-1';
+   files.set(otherId,{...f,id:otherId,name:'Local copy - '+f.name});
+  }
+ }
+ return {...(newerLocal?local:incoming),files:[...files.values()]};
+}
+
 async function applyRestoredZip(zip){
  const entries=await readZip(zip),data=entries.get('warranty-ease-backup.json');
  if(!data)throw new Error('The backup manifest is missing');
@@ -673,15 +736,15 @@ async function applyRestoredZip(zip){
   if(!r.id||typeof r.id!=='string'||!Array.isArray(r.files))throw new Error('Invalid record');
   const row={...r,files:[]};
   for(const f of r.files){if(!f.path||!entries.has(f.path))throw new Error(`Missing file: ${f.name}`);const {path,...meta}=f;row.files.push({...meta,blob:new Blob([entries.get(path)],{type:meta.mime||'application/octet-stream'})});}
-  restored.push(row);
+  restored.push(mergeRestoredRecord(row,getRecord(row.id)));
  }
  for(const a of incomingAccounts)if(!a.id||!a.secretBlob?.iv||!a.secretBlob?.ciphertext)throw new Error('Invalid encrypted login');
- if(!window.confirm(`Restore ${restored.length} appliance record(s) and ${incomingAccounts.length} encrypted website login(s)? Entries with matching IDs will be replaced; local-only records are kept.`))return false;
+ if(!window.confirm(`Restore ${restored.length} appliance record(s) and ${incomingAccounts.length} encrypted website login(s)? Matching records and evidence files are merged; local-only photos and entries are kept.`))return false;
  // One transaction makes appliance, account and vault metadata changes atomic.
  await new Promise((resolve,reject)=>{
   const tx=db.transaction([DB_STORE,ACCOUNTS_STORE,META_STORE],'readwrite');
   const recordStore=tx.objectStore(DB_STORE),accountStore=tx.objectStore(ACCOUNTS_STORE),metaStore=tx.objectStore(META_STORE);
-  try{for(const r of restored)recordStore.put(r);for(const a of incomingAccounts)accountStore.put(a);if(incomingVault)metaStore.put(incomingVault);}catch(e){try{tx.abort();}catch{}reject(e);return;}
+  try{for(const r of restored)recordStore.put(r);for(const a of incomingAccounts){const local=websiteAccounts.find(x=>x.id===a.id);accountStore.put(local&&Date.parse(local.updatedAt||'')>Date.parse(a.updatedAt||'')?local:a);}if(incomingVault)metaStore.put(incomingVault);}catch(e){try{tx.abort();}catch{}reject(e);return;}
   tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Import was interrupted'));
  });
  lockVault(true);await refresh();closeModal(true);renderHome();toast(`Restored ${restored.length} appliances and ${incomingAccounts.length} encrypted website accounts.`);return true;
@@ -840,7 +903,7 @@ async function handleAction(button) {
  case 'ocr-apply':if(editor){let applied=0;const allowed=new Set(['brand','model','productCode','serial','retailer','orderNumber','purchaseDate','price']);for(const input of modalRoot.querySelectorAll('[data-ocr-edit]')){const key=input.dataset.ocrEdit,value=input.value.trim().slice(0,120);if(!allowed.has(key)||!value)continue;if(editor.draft[key]!==value){editor.draft[key]=value;applied++;}}editor.suggestions={};editor.dirty=true;ocrMessage=applied?`${applied} reviewed detail${applied===1?'':'s'} entered. Verify against the photograph before saving.`:'No details were changed.';renderEditor(false);toast(ocrMessage);}break;
  case 'file-remove':if(editor){editor.draft.files=editor.draft.files.filter(f=>f.id!==button.dataset.file);editor.dirty=true;renderEditor(false);}break;
  case 'file-view':{
-  const files=editor?.draft.files||getRecord(detailId)?.files||[];const f=files.find(x=>x.id===button.dataset.file);if(f){const link=URL.createObjectURL(f.blob);window.open(link,'_blank','noopener,noreferrer');setTimeout(()=>URL.revokeObjectURL(link),60000);}break;
+  const files=editor?.draft.files||getRecord(detailId)?.files||[];const f=files.find(x=>x.id===button.dataset.file);if(f){if(!(f.blob instanceof Blob)||!f.blob.size){toast('Original file missing on this device. Restore an encrypted backup.');break;}const link=URL.createObjectURL(f.blob);window.open(link,'_blank','noopener,noreferrer');setTimeout(()=>URL.revokeObjectURL(link),60000);}break;
  }
  case 'delete-record':{
   const r=getRecord(id);if(r&&window.confirm(`Permanently delete "${r.productName||r.model}" and all its saved files from this device?`)){
@@ -881,6 +944,9 @@ document.addEventListener('input',e=>{
  if(el.id==='app-search'){searchTerm=el.value;renderGrid();}
  if(el.id==='claim-problem'&&claim){claim.problem=el.value;updateClaimPreview();}
 });
+// Decoding support varies on iPad (particularly HEIC). A failed thumbnail does
+// not imply the original stored Blob has disappeared.
+document.addEventListener('error',event=>{const image=event.target;if(!(image instanceof HTMLImageElement)||!image.hasAttribute('data-warranty-photo'))return;image.hidden=true;const note=document.createElement('span');note.className='we-photo-preview-fallback';note.textContent='Preview unavailable — original retained';image.parentElement?.append(note);},true);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalKind){closeModal();}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&vaultKey)lockVault(true);});
 document.addEventListener('click',()=>touchVault());

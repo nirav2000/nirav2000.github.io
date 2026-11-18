@@ -12,7 +12,7 @@ window.WarrantyCloud=(()=>{
   const SESSION_KEY='app-monitor.admin-session.v2';
   const state={token:'',refresh:'',expires:0,passphrase:'',email:'',uid:'',method:'',passkeyClient:null,
     lastCloudCopy:'',lastBackupId:'',knownLatestId:'',busy:false,backups:[],error:'',connected:false,
-    pendingRestore:false,remoteChanged:false,autoTimer:0,lastCheck:0,needsSync:false};
+    pendingRestore:false,remoteChanged:false,autoTimer:0,lastCheck:0,needsSync:false,uploading:false,cloudOriginals:0};
   const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt=x=>x?new Date(x).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'Not yet';
   const size=x=>x<1e6?`${Math.round(x/1024)} KB`:`${(x/1048576).toFixed(1)} MB`;
@@ -37,7 +37,7 @@ window.WarrantyCloud=(()=>{
         ${!ready?`<div class="field"><label for="cloud-passphrase">Unlock encrypted cloud copies</label><input id="cloud-passphrase" class="input" type="password" autocomplete="off"><button class="btn btn-line btn-sm" data-action="cloud-unlock">Unlock</button></div>`:''}
         ${recovery}
         <div class="cloud-actions"><button class="btn btn-dark" data-action="cloud-upload" ${!ready||state.pendingRestore||!online||state.busy?'disabled':''}>Save encrypted cloud copy</button><button class="btn btn-line" data-action="cloud-list" ${!online||state.busy?'disabled':''}>Check other devices</button><button class="btn btn-ghost" data-action="cloud-logout">Disconnect</button></div>
-        <p class="cloud-hint">Last saved from this device: ${fmt(state.lastCloudCopy)}. ${state.pendingRestore?'Restore or review cloud changes before uploading from this device.':'New saved changes are queued for encrypted backup while signed in.'} A second device must unlock and restore its latest copy before displaying records.</p>
+        <p class="cloud-hint">Last saved from this device: ${fmt(state.lastCloudCopy)}. ${state.cloudOriginals?'Backup includes '+state.cloudOriginals+' original photos/documents. ':''} ${state.pendingRestore?'Restore or review cloud changes before uploading from this device.':'New saved changes are queued for encrypted backup while signed in.'} A second device must unlock and restore its latest copy before displaying records.</p>
         ${entries?`<div class="cloud-list">${entries}</div>`:'<p class="cloud-hint">No encrypted cloud copies found yet.</p>'}`;
     }
     const msg=state.busy?'Working securely…':state.error||(state.pendingRestore?'Cloud records are ready to restore.':!online?'Offline — local records are still available.':state.connected?'Cloud connected. Local records remain available offline.':'Cloud backup is optional; local records do not require sign-in.');
@@ -134,8 +134,8 @@ window.WarrantyCloud=(()=>{
   async function upload({quiet=false}={}){
     if(!state.connected||!state.passphrase)throw Error('Unlock cloud encryption first.');
     if(state.pendingRestore)throw Error('Another device has cloud records. Restore or review them before uploading.');
-    if(state.busy&&!quiet)return;
-    state.busy=true;state.error='';state.needsSync=true;redraw();
+    if(state.uploading)return;
+    state.uploading=true;state.busy=true;state.error='';state.needsSync=true;redraw();
     try{
       if(!navigator.onLine)throw Error('Offline. Your records are still on this device.');
       // Prevent a second active device from silently writing a newer, divergent archive.
@@ -143,21 +143,27 @@ window.WarrantyCloud=(()=>{
       if(latest()&&latest().id!==prior){state.pendingRestore=true;throw Error('Another device saved a newer cloud copy. Review it before continuing.');}
       const raw=await createRawBackupZip();
       const encrypted=await encryptBackupBytes(new Uint8Array(await raw.arrayBuffer()),state.passphrase);const bytes=await encrypted.arrayBuffer();
-      if(bytes.byteLength>30*1048576)throw Error('This backup exceeds 30 MB. Save an encrypted local ZIP; larger cloud uploads need chunking.');
-      const hash=await crypto.subtle.digest('SHA-256',bytes),sha=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
-      const id=crypto.randomUUID?.()||`archive-${Date.now()}`;
-      const saved=await authorised(`${API}/backups/${encodeURIComponent(id)}`,{method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Warranty-Digest':sha},body:bytes});await jsonResponse(saved);
-      state.lastCloudCopy=new Date().toISOString();state.lastBackupId=id;state.knownLatestId=id;state.needsSync=false;state.pendingRestore=false;
-      await storeAction(META_STORE,'readwrite',tx=>tx.put({id:'lastCloudBackup',at:state.lastCloudCopy,archiveId:id}));
+       const transfer=window.WarrantyCloudChunks;
+       if(!transfer)throw Error('The encrypted cloud transfer module is not installed; reload before backing up.');
+       if(bytes.byteLength>transfer.MAX_TOTAL)throw Error('Encrypted backup is larger than 144 MB. Keep a complete portable archive; reduce file sizes or split your records before cloud upload.');
+       const sha=await transfer.digest(bytes);
+       const id=crypto.randomUUID?.()||`archive-${Date.now()}`;
+       if(bytes.byteLength>30*1048576){
+         await transfer.upload(new Uint8Array(bytes),{id,send:(path,options)=>authorised(API+path,options),onProgress:({part,total})=>{state.error=`Saving encrypted parts ${part} of ${total}...`;redraw()}});
+       }else{
+         const saved=await authorised(`${API}/backups/${encodeURIComponent(id)}`,{method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Warranty-Digest':sha},body:bytes});await jsonResponse(saved);
+       }
+      state.error='';state.lastCloudCopy=new Date().toISOString();state.lastBackupId=id;state.knownLatestId=id;state.needsSync=false;state.pendingRestore=false;state.cloudOriginals=appliances.reduce((n,r)=>n+(r.files||[]).filter(f=>f.blob instanceof Blob&&f.blob.size>0).length,0);
+      await storeAction(META_STORE,'readwrite',tx=>tx.put({id:'lastCloudBackup',at:state.lastCloudCopy,archiveId:id,originals:state.cloudOriginals}));
       try{await writeIndex(id,sha,bytes.byteLength)}catch(error){state.error='Cloudflare copy saved. Firebase index update did not succeed: '+error.message;}
       await list({quiet:true});if(!quiet)toast('Encrypted cloud backup completed.');
-    }finally{state.busy=false;redraw();}
+    }finally{state.uploading=false;state.busy=false;redraw();}
   }
   async function getEncrypted(id){
     if(!/^[A-Za-z0-9_-]{5,80}$/.test(id))throw Error('Invalid cloud archive identifier.');
-    const response=await authorised(`${API}/backups/${encodeURIComponent(id)}`);
-    if(!response.ok){await jsonResponse(response);throw Error('Cloud archive unavailable.');}
-    const value=await response.blob();if(value.size>31*1048576)throw Error('Cloud archive exceeds supported restore size.');return value;
+     const transfer=window.WarrantyCloudChunks;
+     if(!transfer)throw Error('The encrypted cloud restore module is not installed. Reload the app.');
+     return transfer.download(id,{send:(path,options)=>authorised(API+path,options),onProgress:({part,total})=>{state.error=`Checking encrypted parts ${part} of ${total}...`;redraw()}});
   }
   async function restore(id){
     if(!state.passphrase)throw Error('Enter the cloud encryption passphrase first.');
@@ -194,7 +200,7 @@ window.WarrantyCloud=(()=>{
     return true;
   }
   async function loadPrevious(){
-    try{const x=await storeAction(META_STORE,'readonly',tx=>tx.get('lastCloudBackup'));state.lastBackupId=x?.archiveId||'';state.lastCloudCopy=x?.at||'';redraw()}catch{};
+    try{const x=await storeAction(META_STORE,'readonly',tx=>tx.get('lastCloudBackup'));state.lastBackupId=x?.archiveId||'';state.lastCloudCopy=x?.at||'';state.cloudOriginals=Number(x?.originals)||0;redraw()}catch{};
   }
   addEventListener('online',()=>{if(state.needsSync&&state.connected&&state.passphrase&&!state.pendingRestore)scheduleUpload();redraw()});
   addEventListener('visibilitychange',()=>{if(!document.hidden&&state.connected&&Date.now()-state.lastCheck>120000)list().catch(e=>{state.error=e.message;redraw()})});

@@ -1,0 +1,33 @@
+/* Warranty Ease v0.7 - appliance-first cards and durable image indicators. */
+.appliance-grid{grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px}
+.appliance-card{border-color:#dde3ef;box-shadow:0 6px 22px rgba(30,48,83,.045);transition:transform .18s ease,box-shadow .18s ease}
+.appliance-card:hover{box-shadow:0 12px 28px rgba(40,59,110,.11)}
+.appliance-open{height:100%;display:flex;flex-direction:column;text-align:left}
+.appliance-card .card-image{height:190px;width:100%;background:#f2f4fa}
+.appliance-card .card-image img{object-fit:contain;background:#fafbff}
+.appliance-card .card-copy{display:flex;flex-direction:column;flex:1;width:100%;padding:18px}
+.appliance-card .card-kicker{color:#64758c;font-size:11px}
+.appliance-card .card-title{font-size:18px;line-height:1.25}
+.appliance-card .we-card-model{font-size:15px;font-weight:700;color:#263a5e;margin:6px 0 17px;overflow-wrap:anywhere}
+.we-warranty-badge{position:absolute;top:12px;right:12px;border-radius:999px;background:#fff;color:#344a9d;border:1px solid #d6defb;box-shadow:0 3px 13px #26395817;padding:7px 11px;font-weight:750;font-size:11px}
+.we-expiry-line{border-top:1px solid #e6e9f3;padding-top:12px;margin-top:auto;display:flex;flex-direction:column;gap:4px}
+.we-expiry-line span{font-size:11px;color:#708097;font-weight:650}
+.we-expiry-line strong{font-size:21px;font-weight:820;letter-spacing:-.04em;color:#283b71}
+.we-expiry-line .we-expired-text{color:#a34e43}
+.we-evidence-status{display:flex;align-items:center;gap:6px;font-size:11px;color:#728097;margin-top:10px}
+.we-evidence-status .ico{width:14px;height:14px}
+.we-photo-warning{display:block;font-size:11px;color:#a14e43;padding:4px 8px;border-radius:6px;background:#fff0eb}
+.we-card-badge-caption{font-size:10px;color:#66748c}
+.we-resource-links{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px}
+.we-resource-link{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid #e2e6f0;border-radius:11px;background:#fff;text-decoration:none;color:#334d8e!important;font-size:12px}
+.we-resource-link:hover{background:#f4f6ff;border-color:#b7c2fa}
+.we-resource-link strong{display:block;font-size:12px}
+.we-resource-link small{display:block;color:#8490a8;font-size:10px;margin-top:3px}
+.we-resource-link .ico{width:16px;height:16px;flex:none}
+.we-storage-audit{font-size:12px;line-height:1.6;color:#425d80;font-weight:650;margin:7px 0}
+.we-photo-preview-fallback{font-size:11px;color:#5f7090;background:#f0f2fa;padding:10px;border-radius:8px;max-width:80%;text-align:center}
+.file-row .we-photo-warning{font-size:10px;margin-top:4px}
+.details-cover{height:230px;background:#f2f4fb}
+.details-cover img{object-fit:contain}
+@media(max-width:750px){.we-resource-links{grid-template-columns:1fr}.appliance-grid{grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}.appliance-card .card-image{height:168px}}
+@media(max-width:420px){.appliance-grid{grid-template-columns:1fr}.appliance-card .card-image{height:205px}.we-expiry-line strong{font-size:23px}}
