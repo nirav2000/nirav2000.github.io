@@ -1,0 +1,96 @@
+name: Warranty Ease - vendor offline OCR assets
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/vendor-warranty-ocr.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: warranty-ease-ocr-vendor
+  cancel-in-progress: false
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned OCR packages without postinstall scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/warranty-ease-ocr"
+          mkdir -p "$ROOT"
+          npm install --no-audit --no-fund --ignore-scripts --prefix "$ROOT" --no-save tesseract.js@7.0.0
+          node -e 'const root=process.argv[1];const t=require(root+"/node_modules/tesseract.js/package.json");const c=require(root+"/node_modules/tesseract.js-core/package.json");if(t.version!=="7.0.0"||!c.version.startsWith("7."))throw Error("Unexpected OCR versions");console.log("OCR versions",t.version,c.version);' "$ROOT"
+      - name: Copy only required OCR files and record their fingerprints
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/warranty-ease-ocr/node_modules"
+          DEST='WarrantyEase/ocr'
+          mkdir -p "$DEST/core" "$DEST/lang"
+          cp "$ROOT/tesseract.js/dist/tesseract.min.js" "$DEST/tesseract.min.js"
+          cp "$ROOT/tesseract.js/dist/worker.min.js" "$DEST/worker.min.js"
+          cp "$ROOT/tesseract.js/LICENSE.md" "$DEST/TESSERACT-LICENSE.md"
+          find "$ROOT/tesseract.js-core" -maxdepth 1 -type f \( -name 'tesseract-core*.js' -o -name 'tesseract-core*.wasm' \) -exec cp {} "$DEST/core/" \;
+          for f in LICENSE LICENSE.md LICENSE.txt; do if [[ -f "$ROOT/tesseract.js-core/$f" ]]; then cp "$ROOT/tesseract.js-core/$f" "$DEST/CORE-LICENSE.txt"; break; fi; done
+          curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
+            'https://tessdata.projectnaptha.com/4.0.0/eng.traineddata.gz' \
+            -o "$DEST/lang/eng.traineddata.gz"
+          test "$(find "$DEST/core" -maxdepth 1 -name 'tesseract-core*.js' | wc -l)" -ge 4
+          test -s "$DEST/lang/eng.traineddata.gz"
+          test -s "$DEST/tesseract.min.js"
+          test -s "$DEST/worker.min.js"
+          python3 - <<'PY'
+          import json, hashlib, pathlib
+          root=pathlib.Path('WarrantyEase/ocr')
+          names=['tesseract.min.js','worker.min.js']+sorted(str(p.relative_to(root)) for p in (root/'core').glob('tesseract-core*'))+['lang/eng.traineddata.gz']
+          assert all((root/n).is_file() and (root/n).stat().st_size>100 for n in names)
+          # The Web Worker requests same-origin OCR files only. Public listing is used to
+          # pre-cache all required assets for offline recovery without third-party scripts.
+          payload={'schema':1,'tesseract':'7.0.0','assets':['ocr/'+n for n in names], 'sha256':{n:hashlib.sha256((root/n).read_bytes()).hexdigest() for n in names}}
+          (root/'assets.json').write_text(json.dumps(payload,indent=2)+'\n')
+          print('Locally vendored OCR assets:',len(names),'total bytes:',sum((root/n).stat().st_size for n in names))
+          PY
+      - name: Prove recognition on real label and receipt PNG fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const {createWorker}=require(process.env.RUNNER_TEMP+'/warranty-ease-ocr/node_modules/tesseract.js');
+          const path=require('node:path');
+          (async()=>{
+            const worker=await createWorker('eng',1,{
+              langPath:path.resolve('WarrantyEase/ocr/lang'),gzip:true,cacheMethod:'none'
+            });
+            try {
+              const label=await worker.recognize('.github/warranty-ease-fixtures/sample-lg-label.png');
+              const receipt=await worker.recognize('.github/warranty-ease-fixtures/sample-ao-receipt.png');
+              const a=String(label.data.text).toUpperCase().replace(/[^A-Z0-9]/g,'');
+              const b=String(receipt.data.text).toUpperCase().replace(/[^A-Z0-9]/g,'');
+              if(!a.includes('F4Y511WWLA1')||!a.includes('1234AB567890'))throw Error('Model/serial OCR failed: '+label.data.text.slice(0,160));
+              if(!b.includes('1234567')||!b.includes('44900'))throw Error('Receipt OCR failed: '+receipt.data.text.slice(0,160));
+              console.log('PASS: OCR extracted model, serial number, invoice and receipt price.');
+            }finally{await worker.terminate();}
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
+      - name: Publish only local OCR dependencies, never personal records
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- WarrantyEase/ocr/
+          while IFS= read -r path; do
+            [[ -z "$path" || "$path" == WarrantyEase/ocr/* ]] || { echo "Invalid staged path $path"; exit 1; }
+          done < <(git diff --cached --name-only)
+          if git diff --cached --quiet; then echo 'OCR assets already published'; exit 0; fi
+          git commit -m 'build(WarrantyEase): vendor pinned local OCR engine, WASM and English data'
+          git push origin HEAD:main
