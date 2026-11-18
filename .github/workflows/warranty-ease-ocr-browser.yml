@@ -29,9 +29,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m http.server 8822 --bind 127.0.0.1 > "$RUNNER_TEMP/warranty-ease-http.log" 2>&1 &
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout "$RUNNER_TEMP/warranty-ease.key" -out "$RUNNER_TEMP/warranty-ease.crt" -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' >/dev/null 2>&1
+          python3 .github/warranty-ease-fixtures/https-server.py "$RUNNER_TEMP/warranty-ease.crt" "$RUNNER_TEMP/warranty-ease.key" > "$RUNNER_TEMP/warranty-ease-https.log" 2>&1 &
           SERVER=$!
           trap 'kill "$SERVER" 2>/dev/null || true' EXIT
           sleep 2
-          curl --fail --silent http://127.0.0.1:8822/WarrantyEase/ocr/assets.json -o /tmp/we-ocr-assets.json
+          curl --insecure --fail --silent https://127.0.0.1:8822/WarrantyEase/ocr/assets.json -o /tmp/we-ocr-assets.json
           node .github/warranty-ease-fixtures/test-ocr-browser.cjs
