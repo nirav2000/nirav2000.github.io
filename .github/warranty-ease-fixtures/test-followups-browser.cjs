@@ -14,7 +14,7 @@ async function smoke(engine,width){
   await page.locator('#main .home-head').waitFor({timeout:30000});
   const countBefore=await page.locator('.appliance-card').count();
   assert.equal(countBefore,0,'test browser should not contain user data');
-  await page.locator(width>700?'.btn-top-add[data-action="new"]':'.mobile-nav [data-action="new"]').click();
+  await page.locator('.home-add[data-action="new"]').click();
   await page.locator('#field-productName').fill('Test washing machine');
   await page.locator('#field-brand').fill('LG');
   await page.locator('#field-model').fill('F4Y511WWLA1');
@@ -29,7 +29,8 @@ async function smoke(engine,width){
   await page.locator('.modal [data-action="followup-save"]').click();
   await page.locator('.we-followup-home .we-followup-item').waitFor();
   assert.match(await page.locator('.we-followup-home .we-followup-item').first().innerText(),/Call LG/);
-  const nav=width>700?'.header-nav [data-action="notes"]':'.mobile-nav [data-action="notes"]';
+  const nav='.wallet-menu-panel [data-action="notes"]';
+  await page.locator('#wallet-menu summary').click();
   await page.locator(nav).click();
   await page.locator('.we-followup-page').waitFor();
   assert.match(await page.locator('.we-followup-page').innerText(),/Call LG to confirm five-year warranty/);
@@ -43,6 +44,7 @@ async function smoke(engine,width){
   await page.locator('.we-followup-page .we-followup-list').getByText('DEMO-123',{exact:false}).waitFor({timeout:15000});
   await page.reload({waitUntil:'domcontentloaded'});
   await page.locator('#main .home-head').waitFor();
+  await page.locator('#wallet-menu summary').click();
   await page.locator(nav).click();
   await page.locator('[data-action="followup-filter"][data-filter="done"]').click();
   assert.match(await page.locator('.we-followup-page .we-followup-list').innerText(),/DEMO-123/);
