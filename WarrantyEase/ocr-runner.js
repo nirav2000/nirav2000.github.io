@@ -16,6 +16,7 @@ async function getEngine() {
   const base = new URL('./ocr/', self.location.href);
   engine = await self.Tesseract.createWorker('eng', 1, {
     workerPath: new URL('worker.min.js', base).href,
+    workerBlobURL: false, // Honor the app's strict worker-src 'self' CSP.
     corePath: new URL('core/', base).href,
     langPath: new URL('lang/', base).href.replace(/\/$/, ''),
     gzip: true,

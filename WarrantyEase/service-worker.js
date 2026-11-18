@@ -1,5 +1,5 @@
 /* Warranty Ease scoped offline shell; adapted from shared Apps PWA v1 conventions. */
-const CACHE='warranty-ease-v4';
+const CACHE='warranty-ease-v4-1';
 const PREFIX='warranty-ease-v';
 const OCR_CACHE='warranty-ease-ocr-v7';
 const ASSETS=['./','./index.html','./style.css','./app.js','./cloud.js','./boot.mjs','./ocr-control.js','./ocr-runner.js','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
