@@ -8,6 +8,7 @@ async function smoke(engine,width){
  const context=await browser.newContext({viewport:{width,height:850},acceptDownloads:true});
  const page=await context.newPage(),problems=[];
  page.on('pageerror',e=>problems.push(e.message));
+ page.on('dialog',dialog=>dialog.accept());
  try{
   await page.goto(url,{waitUntil:'domcontentloaded',timeout:45000});
   await page.locator('#main .home-head').waitFor({timeout:30000});
@@ -45,9 +46,9 @@ async function smoke(engine,width){
   await page.locator('[data-action="followup-filter"][data-filter="done"]').click();
   assert.match(await page.locator('.we-followup-page .we-followup-list').innerText(),/DEMO-123/);
   await page.locator('.we-followup-page [data-action="followup-toggle"][data-status="open"]').first().click();
+  await page.locator('[data-action="followup-filter"][data-filter="open"]').click();
   assert.match(await page.locator('.we-followup-page .we-followup-list').innerText(),/Call LG/);
   await page.locator('.we-followup-page [data-action="followup-archive"]').first().click();
-  await page.getByText('Archive this follow-up').count().catch(()=>0);
   await page.locator('[data-action="followup-filter"][data-filter="archived"]').click();
   assert.match(await page.locator('.we-followup-page .we-followup-list').innerText(),/Call LG/);
   const all=await page.locator('html').innerHTML();
