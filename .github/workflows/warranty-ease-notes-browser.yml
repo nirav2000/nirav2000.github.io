@@ -1,0 +1,51 @@
+name: Warranty Ease - browser follow-up notes
+on:
+  push:
+    branches: [main]
+    paths:
+      - WarrantyEase/app.js
+      - WarrantyEase/followups.js
+      - WarrantyEase/followups-ui.js
+      - WarrantyEase/followups.css
+      - WarrantyEase/index.html
+      - .github/workflows/warranty-ease-notes-browser.yml
+      - .github/warranty-ease-fixtures/test-followups-browser.cjs
+      - .github/warranty-ease-fixtures/http-server.py
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: warranty-ease-browser-followups
+  cancel-in-progress: true
+jobs:
+  notes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned Chromium and WebKit browsers
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/we-pw" playwright@1.56.1
+          "$RUNNER_TEMP/we-pw/node_modules/.bin/playwright" install --with-deps chromium webkit
+      - name: Test private follow-ups with only synthetic appliance data
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/warranty-ease-fixtures/http-server.py > "$RUNNER_TEMP/warranty-notes-http.log" 2>&1 &
+          SERVER=$!
+          trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          sleep 2
+          curl --fail --silent http://127.0.0.1:8822/WarrantyEase/version.json >/tmp/we-notes-version.json
+          node -e 'const v=require("/tmp/we-notes-version.json");if(v.version!=="0.7.2")throw Error("Wrong app version for notes browser test")'
+          node .github/warranty-ease-fixtures/test-followups-browser.cjs
+      - name: Save synthetic screenshots only if a test failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warranty-ease-followups-test-failure
+          path: /tmp/warranty-followups-*.png
+          if-no-files-found: ignore
+          retention-days: 3
