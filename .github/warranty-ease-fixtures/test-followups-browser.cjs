@@ -39,6 +39,8 @@ async function smoke(engine,width){
   await page.locator('.we-followup-page [data-action="followup-edit"]').first().click();
   await page.locator('#we-followup-details').fill('LG confirmed cover; case reference: DEMO-123.');
   await page.locator('.modal [data-action="followup-save"]').click();
+  // Wait for the IndexedDB transaction, refresh and list render before reloading.
+  await page.locator('.we-followup-page .we-followup-list').getByText('DEMO-123',{exact:false}).waitFor({timeout:15000});
   await page.reload({waitUntil:'domcontentloaded'});
   await page.locator('#main .home-head').waitFor();
   await page.locator(nav).click();
