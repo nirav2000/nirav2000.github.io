@@ -1,0 +1,73 @@
+/* Warranty Ease wallet direction: progressive visual enhancement, no data migrations. */
+:root{--bg:#f8f8f6;--ink:#202521;--green:#276345;--line:#e9ebe7;--shadow:0 8px 26px rgba(23,35,27,.045)}
+.topbar{height:72px;background:#f8f8f6;border-bottom:0;padding-inline:clamp(20px,4vw,48px)}
+.brand-name small,.header-nav,.local-pill,.site-footer{display:none!important}
+.brand-icon{width:32px;height:32px}.brand-name{font-size:19px;letter-spacing:-.045em}
+.main{max-width:760px;padding-top:40px}
+.home-head .eyebrow,.home-title-row p,.home-utility .mini-count,.help-strip,.quick-start,.warranty-footnote,.list-section .section-head p,.home-utility,.backup-nudge{display:none!important}
+.home-title-row{margin-bottom:12px}.home-title-row h1{font-size:clamp(31px,5vw,44px);font-weight:700;letter-spacing:-.05em}
+.home-title-row .title-dot{color:var(--ink)}
+.home-add,.btn-top-add{border-radius:999px;background:#286c48;box-shadow:none;padding-inline:22px}
+.list-section .section-head{margin:8px 0 18px}.list-section .section-head h2{font-size:13px;font-weight:600;color:#7a817c;letter-spacing:0}
+.appliance-grid{display:flex;flex-direction:column;gap:12px;max-width:720px}
+.appliance-card{border:1px solid #edf0eb;border-radius:24px;box-shadow:0 3px 16px rgba(0,0,0,.035)}
+.appliance-card:hover{transform:none;box-shadow:0 6px 22px rgba(0,0,0,.06)}
+.appliance-open{display:flex!important;align-items:center;min-height:146px;width:100%;text-align:left}
+.card-image{width:142px;height:140px;flex:none;background:#f7f8f5}
+.card-image img{object-fit:contain;padding:12px}.card-copy{padding:18px 20px;flex:1;min-width:0}
+.card-kicker,.we-evidence-status,.card-chevron{display:none!important}
+.card-title{font-size:20px;margin-bottom:5px}.card-model{font-size:13px;margin-bottom:12px}
+.we-expiry-line{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;font-size:12px}
+.we-expiry-line span{color:#8a928b}.we-expiry-line strong{font-weight:650;color:#326c4b}
+.we-warranty-badge{display:none!important}
+#we-cloud-banner:empty{display:none}
+#we-cloud-banner:not(:empty){font-size:12px;margin-bottom:16px}
+.mobile-nav{background:#f8f8f6}
+@media(max-width:680px){
+ .main{width:calc(100% - 36px);padding-top:27px;padding-bottom:120px}
+ .topbar{height:64px;padding-inline:18px}.header-actions{display:none}
+ .home-title-row h1{font-size:35px}.home-title-row{display:block}
+ .home-add{position:fixed;bottom:calc(24px + env(safe-area-inset-bottom));right:20px;z-index:30;min-height:56px;padding:0 22px;font-size:15px}
+ .mobile-nav{display:none!important}
+ .appliance-open{min-height:130px}.card-image{width:116px;height:128px}
+ .card-copy{padding:12px 14px}.card-title{font-size:17px}
+ .list-section .section-head{margin-top:14px}
+}
+@media(prefers-reduced-motion:reduce){.appliance-card,.btn{transition:none}}
+
+/* Release hardening: maintain reachable navigation and respect the existing media.css selectors. */
+.topbar{position:relative;z-index:18}
+.wallet-menu{position:relative;margin-left:auto;flex:none}
+.wallet-menu summary{list-style:none;display:flex;align-items:center;justify-content:center;width:44px;height:44px;border:1px solid #e9ece7;border-radius:50%;background:#fff;color:#334239;font-size:25px;line-height:1;cursor:pointer}
+.wallet-menu summary::-webkit-details-marker{display:none}
+.wallet-menu summary:focus-visible{outline:3px solid #9cc792;outline-offset:2px}
+.wallet-menu-panel{position:absolute;top:calc(100% + 10px);right:0;width:218px;border:1px solid #e5eae4;border-radius:18px;padding:7px;background:#fff;box-shadow:0 15px 35px #17251a22;z-index:25}
+.wallet-menu-panel button{display:block;width:100%;padding:12px 13px;border:0;border-radius:10px;background:transparent;color:#34433b;font-size:14px;text-align:left}
+.wallet-menu-panel button:hover,.wallet-menu-panel button:focus-visible{background:#eef3ec}
+.appliance-open{flex-direction:row!important}
+.appliance-card .card-image{width:142px;height:140px;min-width:142px;flex:0 0 142px}
+.appliance-card .card-image img{object-fit:contain;background:transparent}
+.appliance-card .card-copy{width:auto;min-width:0;padding:18px 20px;flex:1}
+.appliance-card .card-title{font-size:20px;line-height:1.2;margin:0 0 5px}
+.appliance-card .we-card-model{font-size:13px;font-weight:550;color:#647068;margin:0 0 12px}
+.appliance-card .we-expiry-line{border:0;padding:0;margin:0;flex-direction:row;align-items:baseline;gap:6px}
+.appliance-card .we-expiry-line span{font-size:12px;color:#8a928b;font-weight:500}
+.appliance-card .we-expiry-line strong{font-size:12px;font-weight:650;letter-spacing:0;color:#326c4b}
+.appliance-card .we-expiry-line .we-expired-text{color:#a34e43}
+.home-utility.wallet-show-search{display:block!important;max-width:440px;margin:0 0 20px}
+.backup-nudge{display:flex!important;border:0;background:#eef2eb;padding:13px 15px;border-radius:14px;margin-top:22px}
+.backup-nudge .backup-nudge-icon{display:none}
+.backup-nudge p{margin:0}
+.warranty-footnote{display:block!important;font-size:11px;color:#8b938e;margin-top:20px}
+@media(max-width:680px){
+ .appliance-card .card-image{height:128px;width:116px;min-width:116px;flex-basis:116px}
+ .appliance-card .card-copy{padding:12px 14px}
+ .appliance-card .card-title{font-size:17px}
+ .backup-nudge{flex-wrap:wrap;gap:8px}
+ .backup-nudge .btn{margin-left:auto}
+ .wallet-menu-panel{width:min(230px,calc(100vw - 36px))}
+}
+@media(max-width:360px){
+ .appliance-card .card-image{height:100px;width:92px;min-width:92px;flex-basis:92px}
+ .appliance-card .card-title{font-size:15px}
+}
