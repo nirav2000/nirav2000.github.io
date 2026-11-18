@@ -1,0 +1,37 @@
+name: Warranty Ease - real-browser photo OCR
+on:
+  push:
+    branches: [main]
+    paths:
+      - WarrantyEase/**
+      - .github/workflows/warranty-ease-ocr-browser.yml
+      - .github/warranty-ease-fixtures/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: warranty-ease-real-browser-ocr
+  cancel-in-progress: true
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned browser testing tools
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/we-pw" playwright@1.56.1
+          "$RUNNER_TEMP/we-pw/node_modules/.bin/playwright" install --with-deps chromium webkit
+      - name: Validate synthetic label + receipt using actual browser OCR engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8822 --bind 127.0.0.1 > "$RUNNER_TEMP/warranty-ease-http.log" 2>&1 &
+          SERVER=$!
+          trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          sleep 2
+          curl --fail --silent http://127.0.0.1:8822/WarrantyEase/ocr/assets.json -o /tmp/we-ocr-assets.json
+          node .github/warranty-ease-fixtures/test-ocr-browser.cjs
