@@ -19,7 +19,8 @@ async function smoke(engine,width){
   await page.locator('#field-brand').fill('LG');
   await page.locator('#field-model').fill('F4Y511WWLA1');
   await page.locator('.modal [data-action="save"]').click();
-  await page.locator('.modal [data-action="close"]').click();
+  await page.locator('.modal .detail-block').first().waitFor({timeout:15000});
+  await page.locator('.modal .close-btn[data-action="close"]').click();
   await page.locator('.we-followup-home [data-action="followup-new"]').click();
   const title='Call LG to confirm five-year warranty';
   await page.locator('#we-followup-title').fill(title);
