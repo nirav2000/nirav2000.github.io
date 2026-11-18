@@ -1,7 +1,7 @@
 'use strict';
 
 // Warranty Ease, private-first edition. Records and file blobs stay in IndexedDB.
-// Photos remain private; photo OCR stays disabled until a locally bundled, isolated engine is verified.
+// Photos stay on this device. English OCR runs in a separately bundled, same-origin Worker; no third-party API.
 const DB_NAME = 'warranty-ease-v1';
 const DB_STORE = 'appliances';
 const ACCOUNTS_STORE = 'website-accounts';
@@ -158,7 +158,7 @@ function renderSettings() {
  <section class="settings-card"><div class="settings-icon">${ico('upload')}</div><h3>Recover from an archive</h3><p>Import a previous encrypted or readable Warranty Ease ZIP. This also restores the website-login vault, so retain its separate passphrase.</p><button class="btn btn-line" data-action="restore">${ico('upload')} Choose backup ZIP</button><p class="note-muted">An encrypted backup can also be recovered using the RECOVER.html inside the archive, without this app.</p></section>
  <section class="settings-card"><div class="settings-icon">${ico('shield')}</div><h3>Keep records on this device</h3><p>Appliance photos, labels and proof of purchase are saved in this browser's private local database. We do not automatically upload them to a server.</p><button class="btn btn-line" data-action="persist">Request persistent storage</button><p class="note-muted" id="storage-info">Checking available space...</p></section>
  <section class="settings-card"><div class="settings-icon">${ico('key')}</div><h3>Warranty website logins</h3><p>Keep website URLs and encrypted sign-in details together. One LG account can be shared by both LG appliances. You must unlock the vault to read credentials.</p><button class="btn btn-line" data-action="logins">${ico('lock')} Manage website logins</button><p class="note-muted">${websiteAccounts.length} protected website account${websiteAccounts.length===1?'':'s'} on this device.</p></section>
- <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Photos and serial labels</h3><p>Take a photo of the label and keep the original evidence. Automatic text extraction is temporarily disabled while we isolate its OCR engine from the password vault.</p><p class="note-muted">Read the model and serial number from your saved photo and verify them before submitting a claim.</p></section>
+ <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Photo text recognition</h3><p>Model-label and receipt photos are scanned automatically on your device, including offline once the scanner assets have been cached.</p><p class="note-muted">The original photo stays saved. Nothing extracted is filled into your fields until you approve it. Use Scan again for difficult photos; clear, close-up images work best.</p><button class="btn btn-line btn-sm" data-action="ocr-offline-prepare">Prepare scanner for offline use</button><p class="note-muted" id="ocr-offline-status">Optional one-time download. After preparation, scanning works without an internet connection.</p></section>
  <section class="settings-card settings-full"><h3>Protect your records for years</h3><ul class="privacy-list"><li>This installed app retains local copies in its browser database, and its interface can open offline after first load. Browser storage can still be removed, especially after long periods of non-use.</li><li>Make an encrypted, portable archive after each change. Store two copies in different safe locations (for example your computer and a separate backup drive).</li><li>Save the archive passphrase and login-vault passphrase somewhere you can retrieve them. These passphrases cannot be reset from the server.</li><li>Never place receipts, serial labels or passwords in a public code repository. Encrypted cloud backups can be enabled with your existing account; check the current sync status before relying on them.</li><li>The app prepares claims but never sends website passwords or submits emails automatically.</li></ul><div class="warning-note">Cloud backup is optional and depends on Firebase and Cloudflare being available. The installed device and exported recovery archives remain your independent copies.</div></section>
  </div>`;
  updateStorageEstimate();
@@ -189,7 +189,7 @@ function filesMarkup(types) {
 function fileRow(f,editable=false) {
  const isImage=f.mime?.startsWith('image/');
  const thumb=isImage?`<img src="${previewUrl(f.blob,'modal')}" alt="">`:ico('file');
- return `<div class="file-row"><div class="file-thumb">${thumb}</div><div class="file-data"><strong title="${esc(f.name)}">${esc(f.name)}</strong><span>${esc(fileLabel(f.type))} &middot; ${fmtSize(f.size||f.blob?.size||0)}${f.ocrText?' &middot; Text scanned':''}</span></div><div class="file-actions"><button class="tiny-btn" data-action="file-view" data-file="${esc(f.id)}" aria-label="View file">View</button>${editable?`<button class="tiny-btn warn" data-action="file-remove" data-file="${esc(f.id)}" aria-label="Remove file">${ico('trash')}</button>`:''}</div></div>`;
+ return `<div class="file-row"><div class="file-thumb">${thumb}</div><div class="file-data"><strong title="${esc(f.name)}">${esc(f.name)}</strong><span>${esc(fileLabel(f.type))} &middot; ${fmtSize(f.size||f.blob?.size||0)}${f.ocrText?' &middot; Text scanned':''}</span></div><div class="file-actions"><button class="tiny-btn" data-action="file-view" data-file="${esc(f.id)}" aria-label="View file">View</button>${editable&&isImage&&['label','receipt'].includes(f.type)?`<button class="tiny-btn scan-btn" data-action="file-scan" data-file="${esc(f.id)}" aria-label="${f.ocrText?'Scan image again':'Read text from image'}">${f.ocrText?'Scan again':'Read text'}</button>`:''}${editable?`<button class="tiny-btn warn" data-action="file-remove" data-file="${esc(f.id)}" aria-label="Remove file">${ico('trash')}</button>`:''}</div></div>`;
 }
 function stepMarkup() {return `<div class="stepper">${['Appliance','Purchase','Warranty'].map((s,i)=>`<div class="step ${editor.step===i?'active':i<editor.step?'done':''}"><div class="step-num">${i<editor.step?ico('check'):i+1}</div><span>${s}</span></div>`).join('')}</div>`;}
 function editorStepContent() {
@@ -200,8 +200,8 @@ function editorStepContent() {
  ${formField('Brand','brand','e.g. LG')}
  ${formField('Model number','model','e.g. F4Y511WWLA1')}
  ${formField('Serial number','serial','Exactly as printed',{full:true,hint:'The serial is specific to your individual appliance. It is different from the model.'})}</div>
- <div class="form-divider"></div><div class="upload-grid">${uploadBox('device','Appliance photo','A quick photo so you can recognise the appliance.')}${uploadBox('label','Model / serial label','Save the original tag photograph; enter the numbers manually for now.')}</div>${filesMarkup(['device','label'])}${ocrNote()}`;
- if(step===1)return `<div class="section-intro"><h3>Where and when did you buy it?</h3><p>Keep proof of purchase here so it is easy to find later.</p></div><div class="upload-grid" style="grid-template-columns:1fr">${uploadBox('receipt','Receipt or order confirmation','Take a picture, or upload an image, PDF or saved email. Saved emails (.eml/.txt) can suggest purchase details.','image/*,.pdf,.eml,.txt')}</div>${filesMarkup(['receipt'])}${ocrNote()}
+ <div class="form-divider"></div><div class="upload-grid">${uploadBox('device','Appliance photo','A quick photo so you can recognise the appliance.')}${uploadBox('label','Model / serial label','Photograph the label. Text is read on this device; confirm any suggested model or serial number.')}</div>${filesMarkup(['device','label'])}${ocrNote()}`;
+ if(step===1)return `<div class="section-intro"><h3>Where and when did you buy it?</h3><p>Keep proof of purchase here so it is easy to find later.</p></div><div class="upload-grid" style="grid-template-columns:1fr">${uploadBox('receipt','Receipt or order confirmation','Receipt photos are read automatically; saved emails (.eml/.txt) can also suggest purchase details. PDFs are stored as evidence.','image/*,.pdf,.eml,.txt')}</div>${filesMarkup(['receipt'])}${ocrNote()}
  <div class="form-divider"></div><div class="form-grid">
  ${formField('Purchased from','retailer','e.g. AO, Marks Electrical')}
  ${formField('Purchase date','purchaseDate','',{type:'date'})}
@@ -232,8 +232,10 @@ function editorStepContent() {
 }
 function calculatedHint() {const d=editor.draft;const computed=addMonthsMinusDay(d.warrantyStart||d.purchaseDate,d.durationMonths);return computed?`<div class="calculated" id="expiry-hint">Estimated end date from your entries: <strong>${fdate(computed)}</strong>. Check against the warranty document.</div>`:`<div class="calculated" id="expiry-hint" style="display:none"></div>`;}
 function ocrNote() {
- const candidates=Object.entries(editor?.suggestions||{}).filter(([,value])=>value);
- return `<div class="ocr-message" id="ocr-message"><strong>${ocrWorking?'Reading photo on this device...':'Photo text extraction'}</strong><span id="ocr-text">${esc(ocrMessage||'Keep a clear photo of the tag and receipt. Automatic photo text recognition is not enabled yet; saved email files can suggest purchase details.')}</span>${candidates.length?`<div class="ocr-suggestions">${candidates.map(([key,val])=>`<span><b>${esc(key.replace(/([A-Z])/g,' $1'))}</b> ${esc(val)}</span>`).join('')}</div><button class="btn btn-sm btn-dark" data-action="ocr-apply">Use suggested details</button>`:''}</div>`;
+ const candidates=Object.entries(editor?.suggestions||{}).filter(([key,value])=>value && value!==editor?.draft[key]);
+ const scanned=(editor?.draft.files||[]).filter(f=>f.ocrText&&((editor?.step===0&&f.type==='label')||(editor?.step===1&&f.type==='receipt')));
+ const note=ocrMessage||'Add a photo of the model/serial label or receipt. We will read it locally and show suggestions for you to review. The original photo is kept.';
+ return `<div class="ocr-message" id="ocr-message" aria-live="polite"><strong>${ocrWorking?'Reading photo on this device...':'On-device photo scanner'}</strong><span id="ocr-text">${esc(note)}</span>${candidates.length?`<div class="ocr-suggestions">${candidates.map(([key,val])=>`<span><b>${esc(key.replace(/([A-Z])/g,' $1'))}</b> ${esc(val)}</span>`).join('')}</div><button class="btn btn-sm btn-dark" data-action="ocr-apply">Use suggested details</button>`:''}${scanned.length?`<details class="ocr-transcript"><summary>Check extracted text (${scanned.length} photo${scanned.length===1?'':'s'})</summary>${scanned.map(f=>`<div><b>${esc(f.name)}</b><pre>${esc(f.ocrText.slice(0,4000))}</pre></div>`).join('')}</details>`:''}<p class="ocr-note-small">Automatic text can make mistakes. Always check against the photograph before relying on it.</p></div>`;
 }
 function renderEditor(resetScroll=false) {
  if(!editor)return;
@@ -248,7 +250,7 @@ function renderEditor(resetScroll=false) {
  document.body.style.overflow='hidden';
 }
 function startNew(initial={}) {editor={draft:newRecord(initial),step:0,dirty:false,suggestions:{}};detailId=null;claim=null;ocrMessage='';renderEditor(true);}
-function startEdit(id) {const r=getRecord(id);if(!r)return;editor={draft:{...r,files:[...(r.files||[])]},step:0,dirty:false,suggestions:{}};detailId=null;claim=null;ocrMessage='';renderEditor(true);}
+function startEdit(id) {const r=getRecord(id);if(!r)return;const suggestions={};for(const f of (r.files||[])){for(const [key,value] of Object.entries(f.ocrSuggestions||{}))if(value&&!r[key])suggestions[key]=value;}editor={draft:{...r,files:[...(r.files||[])]},step:0,dirty:false,suggestions};detailId=null;claim=null;ocrMessage=Object.keys(suggestions).length?'Saved photo results are ready to review. Confirm them against the original image.':'';renderEditor(true);}
 function syncDraftField(el) {
  if(!editor)return;
  const field=el.dataset.field;if(!field)return;
@@ -264,13 +266,13 @@ async function saveEditor() {
  try {
   // Preserve manually entered date. Computed date is shown in the UI and used in claim views.
   await putRecord(editor.draft);
-  const id=editor.draft.id;editor=null;ocrQueue=[];closeModal(true);renderHome();toast('Appliance saved on this device. Remember to export a backup.');
+  const id=editor.draft.id;editor=null;closeModal(true);renderHome();toast('Appliance saved on this device. Remember to export a backup.');
   showDetail(id);
  }catch(err){console.error(err);toast('Unable to save. Check browser storage space and try again.');}
 }
 function closeModal(force=false) {
  if(!force && editor?.dirty && !window.confirm('Discard changes that have not been saved?'))return;
- editor=null;detailId=null;claim=null;accountEditor=null;pendingExportZip=null;pendingImportEntries=null;modalKind=null;ocrQueue=[];clearUrls('modal');modalRoot.innerHTML='';document.body.style.overflow='';
+ editor=null;detailId=null;claim=null;accountEditor=null;pendingExportZip=null;pendingImportEntries=null;modalKind=null;clearUrls('modal');modalRoot.innerHTML='';document.body.style.overflow='';
 }
 
 function infoCell(label,value,copyable=false) {
@@ -407,39 +409,68 @@ async function handlePickedFiles(input) {
   }
  }
  if(['label','receipt'].includes(type)){
-  if(loaded.some(f=>f.mime.startsWith('image/'))){ocrMessage='Image saved in your draft. Enter model and serial numbers manually; no photo data is sent to an OCR service.';updateOcr(ocrMessage);}
+  const images=loaded.filter(f=>f.mime.startsWith('image/'));
+  if(images.length){for(const f of images)enqueueOcr(editor.draft.id,f.id);ocrMessage='Photo saved. Scanning text privately on this device...';updateOcr(ocrMessage);runOcrQueue().catch(error=>console.warn('Photo scanning stopped',error));}
  }
 }
-function loadTesseract() {return Promise.reject(new Error('Photo OCR is not enabled in this production release.'));}
-function updateOcr(text) {ocrMessage=text;const box=document.getElementById('ocr-message');if(box){const strong=box.querySelector('strong');if(strong)strong.textContent=ocrWorking?'Reading photo on this device...':'Photo text extraction';const msg=box.querySelector('#ocr-text');if(msg)msg.textContent=text;}}
+function updateOcr(text) {
+ ocrMessage=text;
+ const box=document.getElementById('ocr-message');
+ if(box){const strong=box.querySelector('strong');if(strong)strong.textContent=ocrWorking?'Reading photo on this device...':'On-device photo scanner';const msg=box.querySelector('#ocr-text');if(msg)msg.textContent=text;}
+}
+function enqueueOcr(editorId,fileId){
+ if(!ocrQueue.some(w=>w.editorId===editorId&&w.fileId===fileId))ocrQueue.push({editorId,fileId});
+}
 async function runOcrQueue() {
  if(ocrWorking)return;
  ocrWorking=true;
- while(ocrQueue.length){
-  const work=ocrQueue.shift();
-  if(!editor||editor.draft.id!==work.editorId)continue;
-  const file=editor.draft.files.find(f=>f.id===work.fileId);if(!file)continue;
-  updateOcr(`Preparing to read ${fileLabel(file.type).toLowerCase()}...`);
-  try {
-   const tesseract=await loadTesseract();
-   const result=await tesseract.recognize(file.blob,'eng',{logger:(log)=>{
-    if(log.status==='recognizing text'&&typeof log.progress==='number')updateOcr(`Reading ${fileLabel(file.type).toLowerCase()}... ${Math.round(log.progress*100)}%`);
-   }});
-   const text=result?.data?.text||'';
-   if(!editor||editor.draft.id!==work.editorId)continue;
-   file.ocrText=text.slice(0,20000);
-   const hits=file.type==='label'?parseLabel(text):parseReceipt(text);
-   const found=Object.entries(hits).filter(([key,value])=>value&&value!==editor.draft[key]);
-   for(const [key,value] of found)editor.suggestions[key]=value;
-   editor.dirty=true;
-   const message=found.length?`Found ${found.length} possible detail${found.length===1?'':'s'}. Check the original image, then tap Use suggested details.`:'Scan finished. No new confident values found. You can enter details manually.';
-   ocrMessage=message;
-   if(modalKind==='editor')renderEditor(false);
-   updateOcr(message);
-  }catch(error){console.warn('OCR unavailable',error);updateOcr('Could not read this image automatically. Your image is still saved in this draft. You can type the details yourself.');}
+ try{
+  while(ocrQueue.length){
+   const work=ocrQueue.shift();
+   const live=editor?.draft.id===work.editorId?editor.draft:null;
+   const saved=live?null:await dbAction('readonly',store=>store.get(work.editorId));
+   const record=live||saved;
+   const file=record?.files?.find(f=>f.id===work.fileId);
+   if(!file)continue;
+   updateOcr(`Preparing to read ${fileLabel(file.type).toLowerCase()}...`);
+   try {
+    if(!window.WarrantyOCR?.recognize)throw Error('The local image scanner is unavailable. Reload the app and try again.');
+    const result=await window.WarrantyOCR.recognize(file.blob,info=>{
+     if(info.stage==='recognizing text'&&typeof info.progress==='number')updateOcr(`Reading ${fileLabel(file.type).toLowerCase()}... ${Math.round(info.progress*100)}%`);
+     else if(info.stage)updateOcr(`Preparing offline scanner: ${String(info.stage).replace(/[^a-z0-9 -]/gi,'').slice(0,40)}...`);
+    });
+    const text=String(result?.data?.text||'').slice(0,20000);
+    const hits=file.type==='label'?parseLabel(text):parseReceipt(text);
+    file.ocrText=text;file.ocrSuggestions=hits;file.ocrAt=new Date().toISOString();
+    const count=Object.entries(hits).filter(([,value])=>!!value).length;
+    const freshEditor=editor?.draft.id===work.editorId?editor:null;
+    if(freshEditor){
+      const target=freshEditor.draft.files.find(f=>f.id===work.fileId);
+      if(target&&target!==file){target.ocrText=text;target.ocrSuggestions=hits;target.ocrAt=file.ocrAt;}
+      for(const [key,value] of Object.entries(hits))if(value&&value!==freshEditor.draft[key])freshEditor.suggestions[key]=value;
+      freshEditor.dirty=true;
+    } else {
+      // Record may have been saved and editor closed while scanning. Keep its OCR text
+      // and suggestions in the original stored file; NEVER auto-fill product fields.
+      const latest=await dbAction('readonly',store=>store.get(work.editorId));
+      const target=latest?.files?.find(f=>f.id===work.fileId);
+      if(target){target.ocrText=text;target.ocrSuggestions=hits;target.ocrAt=file.ocrAt;await putRecord(latest);}
+    }
+    const message=count?`Found ${count} possible detail${count===1?'':'s'}. Check the original image and tap Use suggested details.`:'Scan finished. No clear details detected. Try a sharper, closer photo or enter the details manually.';
+    ocrMessage=message;
+    if(freshEditor&&modalKind==='editor')renderEditor(false);
+    else if(!freshEditor)toast('Photo scan complete. Reopen the appliance to review suggestions.');
+    updateOcr(message);
+   }catch(error){
+    console.warn('Local image scan failed',error);
+    updateOcr(`Could not read this image automatically: ${String(error?.message||'Try Scan again.').slice(0,100)}. The photo is still saved.`);
+    if(editor?.draft.id===work.editorId&&modalKind==='editor')renderEditor(false);
+   }
+  }
+ }finally{
+  ocrWorking=false;
+  const box=document.getElementById('ocr-message');if(box){const strong=box.querySelector('strong');if(strong)strong.textContent='On-device photo scanner';}
  }
- ocrWorking=false;
- const box=document.getElementById('ocr-message');if(box){const strong=box.querySelector('strong');if(strong)strong.textContent='Photo text extraction';}
 }
 function parseLabel(text) {
  const lines=text.toUpperCase().split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
@@ -691,8 +722,7 @@ async function createVault(){
  await storeAction(META_STORE,'readwrite',st=>st.put(meta));
  vaultMeta=meta;vaultKey=key;touchVault();window.WarrantyCloud?.scheduleUpload?.();renderLogins();
  toast('Encrypted vault created. Keep this passphrase safely; it cannot be reset.');
- // Remove any remote OCR script previously loaded before enabling the vault.
- if(window.Tesseract)location.reload();
+ // OCR runs in a separate local Web Worker; no third-party page script is loaded.
 }
 async function unlockVault(){
  const password=document.getElementById('vault-unlock-password')?.value||'';
@@ -778,6 +808,20 @@ async function handleAction(button) {
  case 'claim':startClaim(id);break;
  case 'open-linked-account':closeModal(true);renderLogins();if(vaultKey)await openAccountEditor(id);else toast('Unlock your login vault to view the website account.');break;
  case 'claim-back':showDetail(claim.id);break;
+ case 'ocr-offline-prepare':{
+  const status=document.getElementById('ocr-offline-status');
+  button.disabled=true;
+  if(status)status.textContent='Preparing offline scanner...';
+  try{
+   if(!window.WarrantyOCR?.prepareOffline)throw Error('Offline scanner is unavailable');
+   await window.WarrantyOCR.prepareOffline(({done,total})=>{if(status)status.textContent=`Saving offline scanner files: ${done} of ${total}...`;});
+   if(status)status.textContent='Offline scanner ready. Photo text recognition is available without a connection.';
+   toast('Scanner saved for offline use.');
+  }catch(error){if(status)status.textContent='Not ready yet: '+String(error?.message||error);toast('Connect to the internet and try preparing the scanner again.');}
+  finally{button.disabled=false;}
+  break;
+ }
+ case 'file-scan':if(editor){const f=editor.draft.files.find(x=>x.id===button.dataset.file);if(f&&f.mime.startsWith('image/')){enqueueOcr(editor.draft.id,f.id);ocrMessage='Reading this photograph again...';updateOcr(ocrMessage);runOcrQueue().catch(err=>console.warn(err));}}break;
  case 'ocr-apply':if(editor){let applied=0;for(const [key,value] of Object.entries(editor.suggestions||{})){if(value&&!editor.draft[key]){editor.draft[key]=value;applied++;}}editor.suggestions={};editor.dirty=true;ocrMessage=applied?`${applied} detail${applied===1?'':'s'} added. Please verify against the original.`:'Your existing details were left unchanged. You can edit them manually.';renderEditor(false);toast(ocrMessage);}break;
  case 'file-remove':if(editor){editor.draft.files=editor.draft.files.filter(f=>f.id!==button.dataset.file);editor.dirty=true;renderEditor(false);}break;
  case 'file-view':{

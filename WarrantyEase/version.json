@@ -1,6 +1,6 @@
 {
-  "version": "0.3.0",
-  "release": "private-source-public-shell",
+  "version": "0.4.0",
+  "release": "offline-ocr-v1",
   "dataPublished": false,
-  "sourceSha": "840b3e829f0ffb1ce8812e04722dcf410f2d35b3"
+  "sourceSha": "da919f94c6e07ab83156b0b04697f096692f2915"
 }

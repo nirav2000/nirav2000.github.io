@@ -52,3 +52,16 @@ body{color:var(--ink);background:var(--bg)}button:focus-visible,a:focus-visible,
 /* Existing-account optional E2EE backup panel */
 .cloud-panel{background:white;border:1px solid #dfe5f4;border-radius:17px;padding:22px 24px;margin:0 0 17px;box-shadow:0 4px 18px #1c2d5410}.cloud-head{display:flex;align-items:center;gap:14px;margin-bottom:20px}.cloud-head h3{font-size:18px;margin:0 0 4px;color:#24324e}.cloud-head p{font-size:12px;color:#7e8aa3;margin:0}.cloud-symbol{background:#e9edff;color:#5365cd;width:45px;height:45px;border-radius:13px;display:grid;place-items:center;font-size:22px;flex:none}.cloud-form{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:end}.cloud-form .field label,.cloud-connected .field label{font-size:12px;color:#57647e}.cloud-form .field input{height:45px;width:100%}.cloud-form .cloud-hint,.cloud-form .btn{grid-column:1/-1}.cloud-hint{font-size:11px;line-height:1.55;color:#8994a9;margin:8px 0}.cloud-status{font-size:11px;color:#8b93a4;margin:14px 0 0}.cloud-actions{display:flex;gap:9px;flex-wrap:wrap;margin:15px 0}.cloud-connected{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 12px;background:#f6f7ff;border-radius:10px}.cloud-user{font-size:12px;color:#34425a;overflow-wrap:anywhere}.cloud-state{padding:5px 9px;background:#e5f7f1;border-radius:6px;font-size:10px;color:#328471}.cloud-list{margin-top:15px;border:1px solid #e9edf6;border-radius:12px;overflow:hidden}.cloud-row{display:flex;align-items:center;gap:9px;padding:11px 12px;border-bottom:1px solid #eef0f7}.cloud-row:last-child{border-bottom:none}.cloud-row span{flex:1;min-width:0}.cloud-row strong{display:block;font-size:12px;color:#33415b}.cloud-row small{font-size:11px;color:#909bb0}.cloud-row .btn{font-size:11px;min-height:34px}.cloud-form .btn{justify-self:start}
 @media(max-width:800px){.cloud-form{grid-template-columns:1fr}.cloud-panel{padding:18px}.cloud-actions{flex-direction:column}.cloud-actions .btn{width:100%}.cloud-row{flex-wrap:wrap}.cloud-row span{flex-basis:100%}}
+
+/* OCR results: readable in the light-theme editor, resilient on narrow phones. */
+.ocr-message{background:#f0f3ff;border:1px solid #dfe4fa;color:#364b8a;border-radius:13px;padding:14px 16px}
+.ocr-message strong{color:#273d82;font-size:13px}
+.ocr-message .ocr-suggestions span{background:#fff;border-color:#dce3fa;color:#364970}
+.ocr-message .ocr-suggestions span b{color:#3043a0}
+.ocr-message .ocr-transcript{margin-top:12px;border-top:1px solid #d8def5;padding-top:10px;color:#455577}
+.ocr-message .ocr-transcript summary{cursor:pointer;font-weight:650;font-size:12px;min-height:28px}
+.ocr-message .ocr-transcript div{margin:8px 0}
+.ocr-message .ocr-transcript pre{overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:200px;background:#fff;border:1px solid #e4e8f5;border-radius:8px;padding:9px;font-size:11px}
+.ocr-message .ocr-note-small{font-size:10px;margin:10px 0 0;color:#7e88a3}
+.file-actions .scan-btn{background:#eef1ff;color:#4f5fbb;white-space:nowrap}
+@media (max-width:480px){.file-row{flex-wrap:wrap}.file-row .file-data{flex-basis:calc(100% - 58px)}.file-row .file-actions{flex-basis:100%;justify-content:flex-end}.file-actions .tiny-btn{padding:9px 12px}}
