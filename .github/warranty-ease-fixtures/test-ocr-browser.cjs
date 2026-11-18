@@ -2,7 +2,7 @@
 const {chromium,webkit}=require(process.env.RUNNER_TEMP+'/we-pw/node_modules/playwright');
 const path=require('node:path');
 const assert=require('node:assert/strict');
-const base='http://127.0.0.1:8822/WarrantyEase/';
+const base='https://127.0.0.1:8822/WarrantyEase/';
 const label=path.resolve('.github/warranty-ease-fixtures/sample-lg-label.png');
 const receipt=path.resolve('.github/warranty-ease-fixtures/sample-ao-receipt.png');
 const engines={chromium,webkit};
@@ -15,7 +15,7 @@ async function waitForOCR(page,expected){
 }
 async function run(name){
  const browser=await engines[name].launch({headless:true});
- const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2});
+ const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,ignoreHTTPSErrors:true});
  const page=await context.newPage();
  const errors=[];
  page.on('pageerror',error=>errors.push('Page: '+error.message));
