@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Warranty Ease | Offline emergency recovery</title><style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#24324e;background:#f8f9fc}*{box-sizing:border-box}body{margin:0;padding:28px 15px}.box{max-width:600px;margin:30px auto;background:white;border:1px solid #dfe9dc;border-radius:22px;padding:28px;box-shadow:0 16px 45px #23472a12}.eyebrow{font-size:12px;font-weight:750;color:#4e8663;text-transform:uppercase;letter-spacing:.08em}h1{font-size:32px;margin:12px 0}p,li{line-height:1.6;color:#60766a;font-size:14px}label{font-weight:700;font-size:13px;display:block;margin:20px 0 8px}input{width:100%;border:1px solid #d4ded3;background:#fbfcf9;border-radius:11px;padding:13px;font-size:15px}button{background:#5364d7;color:white;border:0;border-radius:11px;padding:13px 18px;font-size:14px;font-weight:700;cursor:pointer;margin-top:20px}button:disabled{opacity:.5;cursor:wait}#status{min-height:23px;color:#5364d7;font-size:13px;margin-top:16px}.note{margin-top:23px;padding:15px;background:#eef0ff;border-radius:13px;font-size:12px;line-height:1.6;color:#65749a}
+</style></head><body><main class="box"><span class="eyebrow">No account, website or cloud needed</span><h1>Recover your warranty archive</h1><p>This small recovery page is included inside your Warranty Ease backup so you can recover your records and original photos even if the app website disappears.</p><label for="file">1. Select <code>backup.encrypted</code> from the same archive</label><input type="file" id="file" accept=".encrypted,application/octet-stream"><label for="pass">2. Enter your archive passphrase</label><input type="password" id="pass" autocomplete="off" placeholder="The passphrase used for this backup"><button id="recover" type="button">Decrypt &amp; download my records</button><div id="status" role="status"></div><div class="note"><strong>What you will receive:</strong> a normal ZIP containing a readable index, all receipts and photos, warranty details and encrypted website-login vault entries. To read passwords, you will also need the separate vault passphrase. This page runs on your device and never uploads files.</div></main>
+<script>
+'use strict';
+const MAGIC='WEASE02!';const ITERATIONS=310000;
+const box=document.getElementById('status');
+function fail(message){box.textContent=message;}
+document.getElementById('recover').addEventListener('click',async()=>{
+ const file=document.getElementById('file').files[0],pass=document.getElementById('pass').value;
+ if(!file||!pass){fail('Select the encrypted file and enter the archive passphrase.');return;}
+ const button=document.getElementById('recover');button.disabled=true;fail('Decrypting locally...');
+ try{
+  if(!crypto?.subtle)throw new Error('Browser encryption is unavailable. Open this recovery page in a modern desktop browser.');
+  const data=new Uint8Array(await file.arrayBuffer());
+  if(data.length<64||new TextDecoder().decode(data.slice(0,8))!==MAGIC)throw new Error('Not a Warranty Ease encrypted backup file.');
+  const keyMaterial=await crypto.subtle.importKey('raw',new TextEncoder().encode(pass),'PBKDF2',false,['deriveKey']);
+  const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:data.slice(8,24),iterations:ITERATIONS,hash:'SHA-256'},keyMaterial,{name:'AES-GCM',length:256},false,['decrypt']);
+  const content=await crypto.subtle.decrypt({name:'AES-GCM',iv:data.slice(24,36)},key,data.slice(36));
+  const blob=new Blob([content],{type:'application/zip'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='WarrantyEase-recovered-records.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
+  fail('Recovered. Open the ZIP to view your records and original attachments.');
+ }catch(e){fail(e.name==='OperationError'?'Incorrect passphrase or damaged archive.':e.message||'Could not decrypt this file.');}
+ finally{button.disabled=false;document.getElementById('pass').value='';}
+});
+</script></body></html>

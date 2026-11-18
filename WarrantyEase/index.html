@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://warranty-ease-api.nirav2000-github.workers.dev; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests">
+
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f8f9fc">
+  <meta name="description" content="Your appliance details, purchase proof and warranty contacts, ready when you need them.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Warranty Ease">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="icon" href="assets/favicon.png" type="image/png">
+  <link rel="stylesheet" href="style.css">
+  <title>Warranty Ease | Your home, covered.</title>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a href="#home" id="brand-home" class="brand" aria-label="Warranty Ease home">
+        <span class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none"><rect x="0" y="0" width="40" height="40" rx="13" fill="#5A68DE"/><path d="M20 7.4 30 11.2v8.1c0 6.5-4.2 10.6-10 13.5-5.8-2.9-10-7-10-13.5v-8.1L20 7.4Z" stroke="#FFFFFF" stroke-width="1.7"/><path d="m15.2 19.8 3.2 3.2 6.6-7" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span class="brand-name">warranty<span>ease</span><small>Home essentials, in order.</small></span>
+      </a>
+      <nav class="header-nav" aria-label="Main">
+        <button class="nav-link active" data-action="home">My appliances</button>
+        <button class="nav-link" data-action="logins">Website logins</button>
+        <button class="nav-link" data-action="settings">Backup & privacy</button>
+      </nav>
+      <div class="header-actions">
+        <span class="local-pill"><span class="local-dot"></span> Available offline</span>
+        <button class="btn btn-dark btn-top-add" data-action="new"><span class="btn-icon">+</span> Add appliance</button>
+      </div>
+    </header>
+
+    <main id="main" class="main" aria-live="polite"></main>
+    <footer class="site-footer"><span>Made for peace of mind, not paperwork.</span><span>Private first. No account needed.</span></footer>
+  </div>
+  <nav class="mobile-nav" aria-label="Mobile navigation">
+    <button data-action="home" class="mobile-nav-item active"><span data-icon="home"></span>Home</button>
+    <button data-action="new" class="mobile-nav-add" aria-label="Add appliance"><span class="nav-add-symbol">+</span><span class="mobile-add-label">Add</span></button>
+    <button data-action="logins" class="mobile-nav-item"><span data-icon="lock"></span>Logins</button>
+    <button data-action="settings" class="mobile-nav-item"><span data-icon="settings"></span>Backup</button>
+  </nav>
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
+  <input type="file" id="restore-input" accept=".zip,application/zip" hidden>
+  <script src="app.js" defer></script>
+  <script src="cloud.js" defer></script>
+  <script src="boot.mjs" type="module"></script>
+</body>
+</html>
