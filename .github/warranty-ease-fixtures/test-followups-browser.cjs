@@ -14,9 +14,7 @@ async function smoke(engine,width){
   await page.locator('#main .home-head').waitFor({timeout:30000});
   const countBefore=await page.locator('.appliance-card').count();
   assert.equal(countBefore,0,'test browser should not contain user data');
-  await page.locator('.btn-top-add[data-action="new"]').isVisible()
-   ? await page.locator('.btn-top-add[data-action="new"]').click()
-   : await page.locator('[data-action="new"]').first().click();
+  await page.locator(width>700?'.btn-top-add[data-action="new"]':'.mobile-nav [data-action="new"]').click();
   await page.locator('#field-productName').fill('Test washing machine');
   await page.locator('#field-brand').fill('LG');
   await page.locator('#field-model').fill('F4Y511WWLA1');
