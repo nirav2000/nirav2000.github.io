@@ -1,0 +1,12 @@
+{
+  "appId": "warranty-ease",
+  "platformVersion": "1.7.0",
+  "capabilities": {
+    "auth": { "mode": "shadow", "migration": {"phase": "shadow", "authority": "legacy"} },
+    "monitor": true,
+    "firebaseUsage": true
+  },
+  "ui": {"mode": "headless"},
+  "versionLab": {"enabled": true, "managed": false, "developerOnly": true},
+  "meta": {"storage": "device-first", "cloud": "encrypted-r2-snapshots", "firebaseProject": "kk-syllabus"}
+}

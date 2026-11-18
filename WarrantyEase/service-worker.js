@@ -1,8 +1,8 @@
 /* Warranty Ease scoped offline shell; adapted from shared Apps PWA v1 conventions. */
-const CACHE='warranty-ease-v4-1';
+const CACHE='warranty-ease-v6';
 const PREFIX='warranty-ease-v';
 const OCR_CACHE='warranty-ease-ocr-v7';
-const ASSETS=['./','./index.html','./style.css','./app.js','./cloud.js','./boot.mjs','./ocr-control.js','./ocr-runner.js','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
+const ASSETS=['./','./index.html','./style.css','./improvements.css','./app.js','./platform.js','./apps-manifest.json','./cloud.js','./boot.mjs','./ocr-control.js','./ocr-extract.js','./ocr-crop.js','./ocr-runner.js','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await cache.addAll(ASSETS);await self.skipWaiting();})());});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith(PREFIX)&&k!==CACHE&&k!==OCR_CACHE).map(k=>caches.delete(k)));await self.clients.claim();})());});
 self.addEventListener('fetch',event=>{

@@ -1,6 +1,6 @@
 {
-  "version": "0.4.1",
-  "release": "offline-ocr-v1-csp-fix",
+  "version": "0.6.0",
+  "release": "focused-ocr-passkey-cloud-recovery-shared-platform",
   "dataPublished": false,
-  "sourceSha": "c6b5ed728e431ec17de13b9d5d43acf9ae052f62"
+  "sourceSha": "1eaf81b2dc1128f4c55d46b65c9bc7d198514bce"
 }
