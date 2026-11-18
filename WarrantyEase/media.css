@@ -31,3 +31,12 @@
 .details-cover img{object-fit:contain}
 @media(max-width:750px){.we-resource-links{grid-template-columns:1fr}.appliance-grid{grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}.appliance-card .card-image{height:168px}}
 @media(max-width:420px){.appliance-grid{grid-template-columns:1fr}.appliance-card .card-image{height:205px}.we-expiry-line strong{font-size:23px}}
+
+.we-official-photo{grid-column:1/-1;margin:12px 0;padding:15px 16px;border:1px solid #d7dfef;border-radius:14px;background:#f8faff;color:#39476d}
+.we-official-photo strong{display:block;font-size:14px;color:#233553}
+.we-official-photo p{font-size:12px;line-height:1.5;margin:5px 0 11px}
+.we-official-photo small{font-size:11px;display:block;margin-top:9px;color:#63718e}
+.we-official-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.we-official-actions a{font-size:12px;font-weight:650;color:#4256ac;text-decoration:underline}
+.we-official-actions button:disabled{opacity:.6}
+@media(max-width:520px){.we-official-actions{align-items:stretch;flex-direction:column}.we-official-actions button{text-align:center}}

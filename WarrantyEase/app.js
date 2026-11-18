@@ -217,6 +217,13 @@ function uploadBox(type,title,desc,accept='image/*') {
  const camera=type==='reference'?'':`<label>${ico('camera')} Take photo<input hidden type="file" accept="image/*" capture="environment" data-file-type="${type}"></label>`;
  return `<div class="upload-box"><div><div style="color:#63719d">${ico(type==='receipt'||type==='warranty'?'file':'camera')}</div><div class="upload-title">${esc(title)}</div><p>${esc(desc)}</p></div><div class="upload-buttons">${camera}<label>${ico('upload')} Upload<input hidden type="file" accept="${accept}" data-file-type="${type}" multiple></label></div></div>`;
 }
+
+function officialPhotoContent(){
+ const photo=window.WarrantyResources?.photoFor?.(editor?.draft);
+ if(!photo)return '<p class="mini-help">Enter the exact brand and model to find a matching official manufacturer photograph.</p>';
+ const already=editor.draft.files.some(f=>f.manufacturerPhotoId===photo.id);
+ return `<div class="we-official-photo"><div><strong>Official product photo</strong><p>Model-matched picture from ${esc(photo.brand)} for identification, not proof of your installed appliance.</p></div><div class="we-official-actions"><button type="button" class="btn btn-line btn-sm" data-action="download-product-photo" ${already?'disabled':''}>${already?'Official picture saved':'Download manufacturer picture'}</button><a href="${esc(photo.sourcePage)}" target="_blank" rel="noopener noreferrer">View official product page</a></div><small>Saved separately from your installed photo. Requires your verified App Monitor passkey or Firebase cloud connection.</small></div>`;
+}
 function filesMarkup(types) {
  const files=editor.draft.files.filter(f=>types.includes(f.type));
  if(!files.length)return '';
@@ -226,7 +233,7 @@ function fileRow(f,editable=false) {
  const isImage=f.mime?.startsWith('image/'),original=window.WarrantyMedia?.isBlob?.(f.blob);
  const preview=isImage?mediaBlob(f):null;
  const thumb=preview?`<img data-warranty-photo="true" src="${previewUrl(preview,'modal')}" alt="">`:ico(original?'file':'alert');
- return `<div class="file-row"><div class="file-thumb">${thumb}</div><div class="file-data"><strong title="${esc(f.name)}">${esc(f.name)}</strong><span>${esc(fileLabel(f.type))} &middot; ${original?fmtSize(f.blob.size):'Original unavailable'}${f.ocrText?' &middot; Text scanned':''}</span>${!original?`<span class="we-photo-warning">Restore from an encrypted backup if available</span>`:''}</div><div class="file-actions"><button class="tiny-btn" data-action="file-view" data-file="${esc(f.id)}" aria-label="View file" ${original?'':'disabled'}>View</button>${editable&&original&&isImage?`<button class="tiny-btn scan-btn" data-action="file-scan" data-file="${esc(f.id)}">${f.ocrText?'Scan again':'Read text'}</button><button class="tiny-btn scan-btn" data-action="file-crop" data-file="${esc(f.id)}">Crop &amp; scan</button>`:''}${editable?`<button class="tiny-btn warn" data-action="file-remove" data-file="${esc(f.id)}" aria-label="Remove file">${ico('trash')}</button>`:''}</div></div>`;
+ return `<div class="file-row"><div class="file-thumb">${thumb}</div><div class="file-data"><strong title="${esc(f.name)}">${esc(f.name)}</strong><span>${esc(fileLabel(f.type))} &middot; ${original?fmtSize(f.blob.size):'Original unavailable'}${f.source==='manufacturer'?' &middot; Manufacturer reference':''}${f.ocrText?' &middot; Text scanned':''}</span>${!original?`<span class="we-photo-warning">Restore from an encrypted backup if available</span>`:''}</div><div class="file-actions"><button class="tiny-btn" data-action="file-view" data-file="${esc(f.id)}" aria-label="View file" ${original?'':'disabled'}>View</button>${editable&&original&&isImage?`<button class="tiny-btn scan-btn" data-action="file-scan" data-file="${esc(f.id)}">${f.ocrText?'Scan again':'Read text'}</button><button class="tiny-btn scan-btn" data-action="file-crop" data-file="${esc(f.id)}">Crop &amp; scan</button>`:''}${editable?`<button class="tiny-btn warn" data-action="file-remove" data-file="${esc(f.id)}" aria-label="Remove file">${ico('trash')}</button>`:''}</div></div>`;
 }
 function stepMarkup() {return `<div class="stepper">${['Appliance','Purchase','Warranty'].map((s,i)=>`<div class="step ${editor.step===i?'active':i<editor.step?'done':''}"><div class="step-num">${i<editor.step?ico('check'):i+1}</div><span>${s}</span></div>`).join('')}</div>`;}
 function editorStepContent() {
@@ -238,7 +245,7 @@ function editorStepContent() {
  ${formField('Model number','model','e.g. F4Y511WWLA1')}
  ${formField('Serial number','serial','Exactly as printed',{full:true,hint:'The serial is specific to your individual appliance. It is different from the model.'})}
   ${formField('Product code (optional)','productCode','e.g. RH98Y15PBNP.AGWAPUK',{full:true,hint:'Different from the model or serial; often shown on the manufacturer label.'})}</div>
- <div class="form-divider"></div><div class="upload-grid">${uploadBox('device','Installed appliance photo','Keep a photo of your actual installed appliance.')}${uploadBox('reference','Optional catalogue photo','Save a manufacturer product picture to your iPad and attach it here. This does not replace the real installed photo.')}${uploadBox('label','Model / serial label','Photograph the label. Text is read on this device; confirm any suggested model or serial number.')}</div>${filesMarkup(['device','reference','label'])}${formField('Card picture preference','displayPhoto','',{choices:['installed','reference'],full:true,hint:'Installed photo is kept separately from a manufacturer product picture.'})}${ocrNote()}`;
+ <div class="form-divider"></div><div class="upload-grid">${uploadBox('device','Installed appliance photo','Keep a photo of your actual installed appliance.')}${uploadBox('reference','Optional catalogue photo','Save a manufacturer product picture to your iPad and attach it here. This does not replace the real installed photo.')}${uploadBox('label','Model / serial label','Photograph the label. Text is read on this device; confirm any suggested model or serial number.')}</div>${filesMarkup(['device','reference','label'])}<div id="we-official-photo-action">${officialPhotoContent()}</div>${formField('Card picture preference','displayPhoto','',{choices:['installed','reference'],full:true,hint:'Installed photo is kept separately from a manufacturer product picture.'})}${ocrNote()}`;
  if(step===1)return `<div class="section-intro"><h3>Where and when did you buy it?</h3><p>Keep proof of purchase here so it is easy to find later.</p></div><div class="upload-grid" style="grid-template-columns:1fr">${uploadBox('receipt','Receipt or order confirmation','Receipt photos are read automatically; saved emails (.eml/.txt) can also suggest purchase details. PDFs are stored as evidence.','image/*,.pdf,.eml,.txt')}</div>${filesMarkup(['receipt'])}${ocrNote()}
  <div class="form-divider"></div><div class="form-grid">
  ${formField('Purchased from','retailer','e.g. AO, Marks Electrical')}
@@ -295,10 +302,25 @@ function syncDraftField(el) {
  if(!editor)return;
  const field=el.dataset.field;if(!field)return;
  editor.draft[field]=el.value;editor.dirty=true;
+ if(field==='brand'||field==='model'){const panel=document.getElementById('we-official-photo-action');if(panel)panel.innerHTML=officialPhotoContent();}
  if(['purchaseDate','warrantyStart','durationMonths'].includes(field)){
   const hint=document.getElementById('expiry-hint');
   if(hint){const expiry=addMonthsMinusDay(editor.draft.warrantyStart||editor.draft.purchaseDate,editor.draft.durationMonths);hint.style.display=expiry?'':'none';hint.innerHTML=expiry?`Estimated end date from your entries: <strong>${fdate(expiry)}</strong>. Check against the warranty document.`:'';}
  }
+}
+
+function appendReferenceFile(recordId,file,starter){
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction(DB_STORE,'readwrite'),store=tx.objectStore(DB_STORE),req=store.get(recordId);
+  req.onsuccess=()=>{
+   const latest=req.result||{...starter,files:[...(starter.files||[])]};
+   latest.files||=[];
+   if(!latest.files.some(f=>f.id===file.id))latest.files.push(file);
+   latest.updatedAt=new Date().toISOString();store.put(latest);
+  };
+  tx.oncomplete=()=>resolve(true);tx.onerror=()=>reject(tx.error);
+  tx.onabort=()=>reject(tx.error||Error('Could not retain the manufacturer picture.'));
+ });
 }
 async function saveEditor() {
  if(!editor)return;
@@ -898,7 +920,30 @@ async function handleAction(button) {
   finally{button.disabled=false;}
   break;
  }
- case 'file-scan':if(editor){const f=editor.draft.files.find(x=>x.id===button.dataset.file);if(f&&f.mime.startsWith('image/')){enqueueOcr(editor.draft.id,f.id);ocrMessage='Reading this photograph again...';updateOcr(ocrMessage);runOcrQueue().catch(err=>console.warn(err));}}break;
+ case 'download-product-photo':{
+   if(!editor)break;
+   const draft=editor.draft,matched=window.WarrantyResources?.photoFor?.(draft);
+   if(!matched){toast('Enter the exact brand and model first.');break;}
+   if(draft.files.some(f=>f.manufacturerPhotoId===matched.id)){toast('Manufacturer picture is already saved for this appliance.');break;}
+   if(!window.WarrantyCloud?.fetchManufacturerPhoto){toast('Photo importer is unavailable. Reload the app.');break;}
+   button.disabled=true;const originalText=button.textContent;button.textContent='Downloading picture...';
+   try{
+    const blob=await window.WarrantyCloud.fetchManufacturerPhoto(matched.id);
+    const ext=blob.type==='image/png'?'png':blob.type==='image/webp'?'webp':'jpg';
+    const attached={id:uid(),name:`${matched.brand}-${matched.model}-official.${ext}`,type:'reference',
+      mime:blob.type,size:blob.size,blob,source:'manufacturer',sourcePage:matched.sourcePage,
+      manufacturerPhotoId:matched.id,ocrText:'',addedAt:new Date().toISOString()};
+    await appendReferenceFile(draft.id,attached,draft);
+    if(!draft.files.some(f=>f.id===attached.id))draft.files.push(attached);
+    await refresh();window.WarrantyCloud?.scheduleUpload?.();
+    void prepareDisplayImages(draft.id,[attached]);
+    if(editor?.draft===draft&&modalKind==='editor'){editor.dirty=true;renderEditor(false);}
+    toast('Official product picture saved separately. Installed photos are unchanged.');
+   }catch(error){toast(String(error?.message||'Manufacturer image unavailable.').slice(0,180));}
+   finally{button.disabled=false;button.textContent=originalText;}
+   break;
+  }
+  case 'file-scan':if(editor){const f=editor.draft.files.find(x=>x.id===button.dataset.file);if(f&&f.mime.startsWith('image/')){enqueueOcr(editor.draft.id,f.id);ocrMessage='Reading this photograph again...';updateOcr(ocrMessage);runOcrQueue().catch(err=>console.warn(err));}}break;
  case 'file-crop':if(editor){const f=editor.draft.files.find(x=>x.id===button.dataset.file);if(f?.mime?.startsWith('image/')){const crop=await window.WarrantyCrop?.open?.(f.blob);if(crop){enqueueOcr(editor.draft.id,f.id,crop);ocrMessage='Scanning the selected label area...';updateOcr(ocrMessage);runOcrQueue().catch(err=>console.warn(err));}}}break;
  case 'ocr-apply':if(editor){let applied=0;const allowed=new Set(['brand','model','productCode','serial','retailer','orderNumber','purchaseDate','price']);for(const input of modalRoot.querySelectorAll('[data-ocr-edit]')){const key=input.dataset.ocrEdit,value=input.value.trim().slice(0,120);if(!allowed.has(key)||!value)continue;if(editor.draft[key]!==value){editor.draft[key]=value;applied++;}}editor.suggestions={};editor.dirty=true;ocrMessage=applied?`${applied} reviewed detail${applied===1?'':'s'} entered. Verify against the photograph before saving.`:'No details were changed.';renderEditor(false);toast(ocrMessage);}break;
  case 'file-remove':if(editor){editor.draft.files=editor.draft.files.filter(f=>f.id!==button.dataset.file);editor.dirty=true;renderEditor(false);}break;

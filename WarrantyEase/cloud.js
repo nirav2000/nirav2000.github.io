@@ -184,6 +184,21 @@ window.WarrantyCloud=(()=>{
     }finally{state.busy=false;redraw();}
   }
   async function download(id){state.busy=true;state.error='';redraw();try{const blob=await getEncrypted(id);const zipped=await buildZip([{name:'READ_ME_FIRST.txt',data:ARCHIVE_HELP},{name:'RECOVER.html',data:RECOVERY_HTML},{name:'backup.encrypted',data:blob}]);downloadBlob(zipped,`WarrantyEase-cloud-recovery-${id}.zip`)}finally{state.busy=false;redraw();}}
+
+  // Private product reference import. Requires already verified shared App Monitor
+  // passkey / Firebase owner token. Does not alter shared authentication services.
+  async function fetchManufacturerPhoto(id){
+    if(!state.connected)throw Error('Open Backup & privacy and connect with your existing App Monitor passkey first. You can still open the manufacturer product page without signing in.');
+    if(!/^(lg-f4y511wwla1|lg-rhx1009nwk|tcl-65c8l)$/.test(id))throw Error('Manufacturer photo not available for this model.');
+    const response=await authorised(`${API}/product-photos/${encodeURIComponent(id)}`);
+    if(!response.ok){await jsonResponse(response);throw Error('Manufacturer photo could not be downloaded.');}
+    const mime=(response.headers.get('Content-Type')||'').split(';')[0].toLowerCase();
+    if(!['image/jpeg','image/png','image/webp'].includes(mime))throw Error('Manufacturer returned an unsupported photo.');
+    const blob=await response.blob();
+    if(!blob.size||blob.size>8*1024*1024)throw Error('Manufacturer photo is empty or too large.');
+    return blob;
+  }
+
   function scheduleUpload(){
     state.needsSync=true;
     if(state.autoTimer)clearTimeout(state.autoTimer);
@@ -205,5 +220,5 @@ window.WarrantyCloud=(()=>{
   addEventListener('online',()=>{if(state.needsSync&&state.connected&&state.passphrase&&!state.pendingRestore)scheduleUpload();redraw()});
   addEventListener('visibilitychange',()=>{if(!document.hidden&&state.connected&&Date.now()-state.lastCheck>120000)list().catch(e=>{state.error=e.message;redraw()})});
   setTimeout(loadPrevious,500);
-  return{panel,banner,redraw,handle,scheduleUpload,status:()=>({connected:state.connected,method:state.method,latestBackup:state.lastCloudCopy,pendingRestore:state.pendingRestore,error:state.error,needsSync:state.needsSync})};
+  return{panel,banner,redraw,handle,scheduleUpload,fetchManufacturerPhoto,status:()=>({connected:state.connected,method:state.method,latestBackup:state.lastCloudCopy,pendingRestore:state.pendingRestore,error:state.error,needsSync:state.needsSync})};
 })();

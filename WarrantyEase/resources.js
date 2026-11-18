@@ -20,8 +20,20 @@ const KNOWN=[
   {kind:'updates',title:'TCL user manuals and software downloads',url:'https://www.tcl.com/uk/en/download'},
  ]}
 ];
+
+const PHOTOS=[
+ {id:'lg-f4y511wwla1',brand:'LG',model:'F4Y511WWLA1',sourcePage:'https://www.lg.com/uk/laundry/washing-machines/f4y511wwla1/'},
+ {id:'lg-rhx1009nwk',brand:'LG',model:'RHX1009NWK',sourcePage:'https://www.lg.com/uk/laundry/tumble-dryers/rhx1009nwk/'},
+ {id:'tcl-65c8l',brand:'TCL',model:'65C8L',sourcePage:'https://www.tcl.com/uk/en/tvs/65c8l'}
+];
+function photoFor(record){
+ const model=String(record?.model||'').trim().toUpperCase().replace(/-UK$/,'');
+ const brand=String(record?.brand||'').trim().toUpperCase();
+ return PHOTOS.find(p=>p.brand===brand&&p.model===model)||null;
+}
+
 function officialLinks(record){const model=String(record?.model||'').trim().toUpperCase();const brand=String(record?.brand||'').trim().toUpperCase();const found=KNOWN.find(p=>brand===p.brand&&(model===p.model||model===p.model+'-UK'));return found?found.links.map(x=>({...x,source:'manufacturer',verifiedDate:'2026-11-18'})):[];}
 function allowedUrl(value){try{const url=new URL(value);return url.protocol==='https:'&&!!url.hostname&&!url.username&&!url.password&&url.href.length<1500?url.href:''}catch{return ''}}
-const api={officialLinks,allowedUrl};global.WarrantyResources=api;
+const api={officialLinks,allowedUrl,photoFor};global.WarrantyResources=api;
 if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
