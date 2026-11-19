@@ -40,8 +40,7 @@ jobs:
           SERVER=$!
           trap 'kill "$SERVER" 2>/dev/null || true' EXIT
           sleep 2
-          curl --fail --silent http://127.0.0.1:8822/WarrantyEase/version.json >/tmp/we-notes-version.json
-          cmp /tmp/warranty-notes-version.json WarrantyEase/version.json
+          curl --fail --silent http://127.0.0.1:8822/WarrantyEase/version.json | cmp - WarrantyEase/version.json
           node .github/warranty-ease-fixtures/test-followups-browser.cjs
       - name: Save synthetic screenshots only if a test failed
         if: failure()
