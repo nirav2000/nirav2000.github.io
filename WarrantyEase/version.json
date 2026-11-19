@@ -1,6 +1,6 @@
 {
-  "version": "0.8.2",
-  "release": "receipt-scan-recovery",
+  "version": "0.8.3",
+  "release": "mobile-add-and-receipt-recovery",
   "dataPublished": false,
-  "sourceSha": "44c2cf00a1597e73208580a7792a5fa478eb653d"
+  "sourceSha": "aa8719af2d9199aa94e68f4939c543a58280e970"
 }

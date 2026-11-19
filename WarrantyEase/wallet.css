@@ -23,11 +23,11 @@
 #we-cloud-banner:empty{display:none}
 #we-cloud-banner:not(:empty){font-size:12px;margin-bottom:16px}
 .mobile-nav{background:#f8f8f6}
-@media(max-width:680px){
+@media(max-width:700px){
  .main{width:calc(100% - 36px);padding-top:27px;padding-bottom:120px}
  .topbar{height:64px;padding-inline:18px}.header-actions{display:none}
  .home-title-row h1{font-size:35px}.home-title-row{display:block}
- .home-add{position:fixed;bottom:calc(24px + env(safe-area-inset-bottom));right:20px;z-index:30;min-height:56px;padding:0 22px;font-size:15px}
+ .home-add{display:inline-flex;position:fixed;bottom:calc(24px + env(safe-area-inset-bottom));right:20px;z-index:30;min-height:56px;padding:0 22px;font-size:15px}
  .mobile-nav{display:none!important}
  .appliance-open{min-height:130px}.card-image{width:116px;height:128px}
  .card-copy{padding:12px 14px}.card-title{font-size:17px}
@@ -59,7 +59,7 @@
 .backup-nudge .backup-nudge-icon{display:none}
 .backup-nudge p{margin:0}
 .warranty-footnote{display:block!important;font-size:11px;color:#8b938e;margin-top:20px}
-@media(max-width:680px){
+@media(max-width:700px){
  .appliance-card .card-image{height:128px;width:116px;min-width:116px;flex-basis:116px}
  .appliance-card .card-copy{padding:12px 14px}
  .appliance-card .card-title{font-size:17px}
