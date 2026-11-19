@@ -1,6 +1,6 @@
 {
-  "version": "0.8.0",
-  "release": "automatic-encrypted-sync",
+  "version": "0.8.1",
+  "release": "automatic-sync-session-recovery",
   "dataPublished": false,
-  "sourceSha": "829ed6fff1f9d9856caea6ae7c932df73666564e"
+  "sourceSha": "0e4698e8afe8d71a08493997a256bb26fb0aac8d"
 }

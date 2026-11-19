@@ -57,7 +57,7 @@ window.WarrantyCloud=(()=>{
     return '<div class="we-sync-banner" role="status"><span>'+esc(status)+
       '</span><button type="button" data-action="settings">'+(state.error?'Fix sync':'Sync settings')+'</button></div>';
   }
-  function redraw(){const target=document.getElementById('cloud-ui');if(target)target.innerHTML=panel();const bannerNode=document.getElementById('we-cloud-banner');if(bannerNode)bannerNode.innerHTML=banner();}
+  function redraw(){const target=document.getElementById('cloud-ui');if(target)target.innerHTML=panel();const bannerNode=document.getElementById('we-cloud-banner');if(bannerNode)bannerNode.innerHTML=banner();const nudge=document.querySelector?.('.backup-nudge');if(nudge)nudge.style.display=state.connected?'none':'';}
   async function jsonResponse(response){const d=await response.json().catch(()=>({}));if(!response.ok)throw new Error(String(d?.error?.message||d?.error||d?.message||`HTTP ${response.status}`));return d;}
   async function requestFirebaseToken(){
     if(state.expires>Date.now()+60e3)return state.token;
@@ -72,7 +72,10 @@ window.WarrantyCloud=(()=>{
     if(state.method==='passkey'){
       if(!state.passkeyClient)throw Error('App Monitor passkey session is not available. Connect again.');
       const session=await state.passkeyClient.validateSession();
-      if(session?.method!=='passkey')throw Error('App Monitor passkey session expired. Unlock again.');
+      if(session?.method!=='passkey'){
+        state.connected=false;state.method='';
+        throw Error('Passkey session expired. Unlock again to resume automatic sync.');
+      }
       auth=state.passkeyClient.authHeaders();
     }else if(state.method==='firebase')auth={Authorization:`Bearer ${await requestFirebaseToken()}`};
     else throw Error('Connect to encrypted cloud backup first.');
