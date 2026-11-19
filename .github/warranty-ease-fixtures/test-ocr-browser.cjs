@@ -7,15 +7,9 @@ const label=path.resolve('.github/warranty-ease-fixtures/sample-lg-label.png');
 const receipt=path.resolve('.github/warranty-ease-fixtures/sample-ao-receipt.png');
 const engines={chromium,webkit};
 const timeout=150000;
-async function waitForOCR(page,expected){
- await page.waitForFunction((expected)=>{
-  const box=document.getElementById('ocr-message');
-  return !!box?.textContent?.includes(expected);
- },expected,{timeout});
-}
 async function run(name){
- const browser=await engines[name].launch({headless:true});
- const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,ignoreHTTPSErrors:false});
+ // A fresh persistent profile exercises normal on-device IndexedDB attachment storage.
+ const context=await engines[name].launchPersistentContext('',{headless:true,viewport:{width:390,height:844},deviceScaleFactor:2,ignoreHTTPSErrors:false});
  const page=await context.newPage();
  const errors=[];
  page.on('pageerror',error=>errors.push('Page: '+error.message));
@@ -25,7 +19,10 @@ async function run(name){
   await page.locator('[data-action="new"]:visible').first().click();
   assert.equal(await page.locator('[data-field="model"]').inputValue(),'');
   await page.locator('input[data-file-type="label"]').last().setInputFiles(label);
-  await waitForOCR(page,'Found');
+  await page.waitForFunction(()=>document.querySelector('#ocr-text')?.textContent.includes('Found') ||
+   document.body.innerText.includes('Could not add the selected file.') ||
+   document.querySelector('#ocr-text')?.textContent.includes('Could not read'),undefined,{timeout});
+  assert.match(await page.locator('#ocr-text').innerText(),/Found/);
   assert.match(await page.locator('[data-ocr-edit="model"]').inputValue(),/^F4Y511WWLA1/);
   assert.equal(await page.locator('[data-ocr-edit="serial"]').inputValue(),'1234AB567890');
   assert.equal(await page.locator('[data-field="model"]').inputValue(),'','OCR must never silently overwrite model');
@@ -70,6 +67,6 @@ async function run(name){
   const body=(await page.locator('body').innerText().catch(()=>''))||'';
   console.error(name+' FAILED:',error.stack,'\nBody excerpt:',body.slice(0,2500),'\nConsole:',errors);
   throw error;
- }finally{await context.close();await browser.close();}
+ }finally{await context.close();}
 }
 (async()=>{for(const name of ['chromium','webkit'])await run(name);})().catch(e=>{console.error(e);process.exitCode=1});
