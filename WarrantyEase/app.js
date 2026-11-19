@@ -6,6 +6,7 @@ const DB_NAME = 'warranty-ease-v1';
 const DB_STORE = 'appliances';
 const ACCOUNTS_STORE = 'website-accounts';
 const META_STORE = 'app-meta';
+const DEVICE_BACKUPS_STORE = 'device-backups';
 const VAULT_KDF_ITERATIONS = 310000;
 let websiteAccounts = [];
 let vaultMeta = null;
@@ -115,7 +116,7 @@ function toast(msg) {toastRoot.innerHTML=`<div class="toast">${esc(msg)}</div>`;
 function safeHttp(value) {if(!value)return '';try{const u=new URL(/^https?:\/\//i.test(value)?value:`https://${value}`);return /^(https?):$/.test(u.protocol)?u.href:'';}catch{return '';}}
 function safeEmail(value) {return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value||'')?value:'';}
 
-function openDB() {return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,2);request.onupgradeneeded=()=>{const database=request.result;for(const store of [DB_STORE,ACCOUNTS_STORE,META_STORE])if(!database.objectStoreNames.contains(store))database.createObjectStore(store,{keyPath:'id'});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);request.onblocked=()=>reject(new Error('Storage upgrade is blocked by another tab'));});}
+function openDB() {return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,3);request.onupgradeneeded=()=>{const database=request.result;for(const store of [DB_STORE,ACCOUNTS_STORE,META_STORE,DEVICE_BACKUPS_STORE])if(!database.objectStoreNames.contains(store))database.createObjectStore(store,{keyPath:'id'});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);request.onblocked=()=>reject(new Error('Storage upgrade is blocked by another tab'));});}
 function storeAction(storeName,mode,callback) {return new Promise((resolve,reject)=>{const tx=db.transaction(storeName,mode);const store=tx.objectStore(storeName);let request;try{request=callback(store);}catch(e){reject(e);return;}tx.oncomplete=()=>resolve(request?.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Storage was interrupted'));});}
 function dbAction(mode,callback){return storeAction(DB_STORE,mode,callback);}
 // Read, merge, and write within ONE IndexedDB transaction to prevent OCR and
@@ -123,9 +124,9 @@ function dbAction(mode,callback){return storeAction(DB_STORE,mode,callback);}
 function patchStoredFile(recordId,fileId,changes){return new Promise((resolve,reject)=>{
  const tx=db.transaction(DB_STORE,'readwrite'),store=tx.objectStore(DB_STORE),req=store.get(recordId);
  req.onsuccess=()=>{const row=req.result,attached=row?.files?.find(f=>f.id===fileId);
-  if(attached){Object.assign(attached,changes);row.updatedAt=new Date().toISOString();store.put(row);}
+  if(attached){Object.assign(attached,changes);if(Object.keys(changes).some(k=>k!=='previewBlob'))row.updatedAt=new Date().toISOString();store.put(row);}
  };
- tx.oncomplete=()=>resolve(true);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Attachment update could not finish'));
+ tx.oncomplete=()=>{if(Object.keys(changes).some(key=>key!=='previewBlob'))window.WarrantyCloud?.scheduleUpload?.();resolve(true)};tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Attachment update could not finish'));
  });}
 async function prepareDisplayImages(recordId,files){
  for(const f of files){
@@ -142,7 +143,23 @@ async function prepareDisplayImages(recordId,files){
 
 async function refresh() {appliances=await dbAction('readonly',store=>store.getAll());appliances.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));websiteAccounts=await storeAction(ACCOUNTS_STORE,'readonly',store=>store.getAll());websiteAccounts.sort((a,b)=>String(a.brand).localeCompare(String(b.brand)));vaultMeta=await storeAction(META_STORE,'readonly',store=>store.get('vault'))||null;const last=await storeAction(META_STORE,'readonly',store=>store.get('lastBackup'));lastBackupAt=last?.at||null;}
 async function putRecord(record) {record.updatedAt=new Date().toISOString();await dbAction('readwrite',store=>store.put(record));await refresh();window.WarrantyCloud?.scheduleUpload?.();}
-async function deleteRecord(id) {await dbAction('readwrite',store=>store.delete(id));await refresh();window.WarrantyCloud?.scheduleUpload?.();}
+// A tombstone travels in encrypted backups, preventing an older device from reviving deleted entries.
+async function deleteWithTombstone(storeName,id,kind){
+ const deletedAt=new Date().toISOString();
+ await new Promise((resolve,reject)=>{
+  const tx=db.transaction([storeName,META_STORE],'readwrite'),metadata=tx.objectStore(META_STORE);
+  const request=metadata.get('syncTombstones');
+  request.onsuccess=()=>{
+   const items=Array.isArray(request.result?.items)?request.result.items:[];
+   metadata.put({id:'syncTombstones',items:[...items.filter(x=>x.id!==id||x.kind!==kind),{id,kind,deletedAt}]});
+   tx.objectStore(storeName).delete(id);
+  };
+  tx.oncomplete=()=>resolve();
+  tx.onerror=()=>reject(tx.error||Error('Could not record the deletion'));
+  tx.onabort=()=>reject(tx.error||Error('Deletion interrupted'));
+ });
+}
+async function deleteRecord(id) {await deleteWithTombstone(DB_STORE,id,'appliance');await refresh();window.WarrantyCloud?.scheduleUpload?.();}
 function getRecord(id) {return appliances.find(r=>r.id===id);}
 
 function setNavState() {
@@ -152,7 +169,7 @@ function renderHome() {
  currentView='home';setNavState();clearUrls('main');
  const covered=appliances.filter(isCovered).length;
  const latest=[...appliances,...websiteAccounts].map(x=>x.updatedAt||'').sort().at(-1)||'';
- const needsArchive=!!(appliances.length||websiteAccounts.length)&&(!lastBackupAt||latest>lastBackupAt);
+ const needsArchive=!!(appliances.length||websiteAccounts.length)&&!window.WarrantyCloud?.status?.().connected&&(!lastBackupAt||latest>lastBackupAt);
  root.innerHTML=`
  <section class="home-head">
   <div class="eyebrow">Your home, organised</div>
@@ -219,7 +236,7 @@ async function saveFollowUp(){
   await refresh();window.WarrantyCloud?.scheduleUpload?.();
   closeModal(true);
   if(origin==='detail')showDetail(recordId);else if(origin==='notes')renderFollowUps();else renderHome();
-  toast('Saved with this appliance. Include it in your next encrypted cloud backup.');
+  toast('Saved. Sync will run automatically when connected.');
  }catch(e){toast(e.message||'Could not save follow-up.');}
 }
 async function changeFollowUpStatus(recordId,noteId,status){
@@ -713,7 +730,8 @@ const RECOVERY_HTML="<!doctype html>\n<html lang=\"en-GB\"><head><meta charset=\
 const BACKUP_MAGIC='WEASE02!';
 const ARCHIVE_HELP=`WARRANTY EASE - OFFLINE ARCHIVE\n\n1. Extract the files inside this ZIP.\n2. Open RECOVER.html in a modern browser.\n3. Choose backup.encrypted and enter your archive passphrase.\n4. Open the resulting ordinary ZIP: APPLIANCE-INDEX.txt lists your devices and the files folder contains the original evidence.\n5. Website passwords inside the restored records remain encrypted by your separate website vault passphrase.\n\nThe RECOVER.html file works without Warranty Ease's website or any cloud login.\nNo data is uploaded while decrypting.\nKeep this archive in at least two safe locations, including outside your phone.\nIf a browser blocks local file crypto, open RECOVER.html using a small local HTTP server or a modern desktop browser.\n\nBACKUP ENCRYPTION: PBKDF2-SHA256, 310000 iterations, 16-byte random salt, AES-256-GCM, 12-byte IV. Encrypted payload starts with 8 ASCII bytes WEASE02!, then salt, IV, ciphertext plus GCM authentication tag.\n`;
 async function createRawBackupZip(){
- const manifest={app:'Warranty Ease',version:2,exportedAt:new Date().toISOString(),records:[],websiteAccounts,websiteVault:vaultMeta};
+ const deleted=await storeAction(META_STORE,'readonly',st=>st.get('syncTombstones'));
+  const manifest={app:'Warranty Ease',version:3,exportedAt:new Date().toISOString(),records:[],websiteAccounts,websiteVault:vaultMeta,deletions:deleted?.items||[]};
  const items=[];
  let readable='WARRANTY EASE - APPLIANCE INDEX\nExported: '+manifest.exportedAt+'\n\n';
  for(const r of appliances){
@@ -811,34 +829,72 @@ function mergeRestoredRecord(incoming,local){
  return {...(newerLocal?local:incoming),files:[...files.values()],followUps:window.WarrantyFollowUps?.merge?.(incoming.followUps,local.followUps)||[...(incoming.followUps||[]),...(local.followUps||[])]};
 }
 
-async function applyRestoredZip(zip){
+async function applyRestoredZip(zip,{automatic=false}={}){
  const entries=await readZip(zip),data=entries.get('warranty-ease-backup.json');
  if(!data)throw new Error('The backup manifest is missing');
  const json=JSON.parse(await data.text());
- if(json.app!=='Warranty Ease'||![1,2].includes(json.version)||!Array.isArray(json.records))throw new Error('Unsupported backup version');
- const incomingAccounts=json.version===2?json.websiteAccounts||[]:[];
- const incomingVault=json.version===2?json.websiteVault||null:null;
- if(!Array.isArray(incomingAccounts)||incomingAccounts.length&&!incomingVault)throw new Error('Incomplete account vault data');
+ if(json.app!=='Warranty Ease'||![1,2,3].includes(json.version)||!Array.isArray(json.records))throw new Error('Unsupported backup version');
+ const incomingAccounts=json.version>=2?json.websiteAccounts||[]:[];
+ const incomingVault=json.version>=2?json.websiteVault||null:null;
+ const incomingDeletes=json.version>=3?json.deletions||[]:[];
+ if(!Array.isArray(incomingAccounts)||!Array.isArray(incomingDeletes)||incomingAccounts.length&&!incomingVault)throw new Error('Incomplete account vault data');
  if(incomingVault&&vaultMeta&&incomingVault.salt!==vaultMeta.salt&&websiteAccounts.length){
-  throw new Error('This backup has a different website-login vault. Restore on an empty device or export your current vault first. Nothing was changed.');
+  throw new Error('These devices have different website-login vault keys. Export both vaults before combining. Nothing was changed.');
+ }
+ const localDeleteRow=await storeAction(META_STORE,'readonly',st=>st.get('syncTombstones'));
+ const deleted=new Map();
+ for(const item of [...(localDeleteRow?.items||[]),...incomingDeletes]){
+  if(!item||!['appliance','account'].includes(item.kind)||typeof item.id!=='string'||!item.id||!Number.isFinite(Date.parse(item.deletedAt||'')))throw new Error('Invalid deletion history');
+  const key=item.kind+':'+item.id,prev=deleted.get(key);
+  if(!prev||item.deletedAt>prev.deletedAt)deleted.set(key,{id:item.id,kind:item.kind,deletedAt:item.deletedAt});
  }
  const restored=[];
  for(const r of json.records){
   if(!r.id||typeof r.id!=='string'||!Array.isArray(r.files))throw new Error('Invalid record');
   const row={...r,files:[]};
-  for(const f of r.files){if(!f.path||!entries.has(f.path))throw new Error(`Missing file: ${f.name}`);const {path,...meta}=f;row.files.push({...meta,blob:new Blob([entries.get(path)],{type:meta.mime||'application/octet-stream'})});}
-  restored.push(mergeRestoredRecord(row,getRecord(row.id)));
+  for(const f of r.files){
+   if(!f.path||!entries.has(f.path))throw new Error('Missing file: '+String(f.name));
+   const {path,...meta}=f;
+   row.files.push({...meta,blob:new Blob([entries.get(path)],{type:meta.mime||'application/octet-stream'})});
+  }
+  const merged=mergeRestoredRecord(row,getRecord(row.id));
+  if((deleted.get('appliance:'+row.id)?.deletedAt||'')>(merged.updatedAt||''))continue;
+  restored.push(merged);
  }
  for(const a of incomingAccounts)if(!a.id||!a.secretBlob?.iv||!a.secretBlob?.ciphertext)throw new Error('Invalid encrypted login');
- if(!window.confirm(`Restore ${restored.length} appliance record(s) and ${incomingAccounts.length} encrypted website login(s)? Matching records and evidence files are merged; local-only photos and entries are kept.`))return false;
- // One transaction makes appliance, account and vault metadata changes atomic.
+ if(!automatic&&!window.confirm('Restore '+restored.length+' appliance(s) and '+incomingAccounts.length+' encrypted website login(s)? Existing local evidence is kept.'))return false;
+ // All appliance records, vault entries and deletion history commit together.
  await new Promise((resolve,reject)=>{
   const tx=db.transaction([DB_STORE,ACCOUNTS_STORE,META_STORE],'readwrite');
   const recordStore=tx.objectStore(DB_STORE),accountStore=tx.objectStore(ACCOUNTS_STORE),metaStore=tx.objectStore(META_STORE);
-  try{for(const r of restored)recordStore.put(r);for(const a of incomingAccounts){const local=websiteAccounts.find(x=>x.id===a.id);accountStore.put(local&&Date.parse(local.updatedAt||'')>Date.parse(a.updatedAt||'')?local:a);}if(incomingVault)metaStore.put(incomingVault);}catch(e){try{tx.abort();}catch{}reject(e);return;}
-  tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Import was interrupted'));
+  try{
+   for(const r of restored)recordStore.put(r);
+   for(const a of incomingAccounts){
+    const local=websiteAccounts.find(x=>x.id===a.id);
+    const chosen=local&&Date.parse(local.updatedAt||'')>Date.parse(a.updatedAt||'')?local:a;
+    if((deleted.get('account:'+a.id)?.deletedAt||'')>(chosen.updatedAt||''))continue;
+    accountStore.put(chosen);
+   }
+   for(const entry of deleted.values()){
+    if(entry.kind==='appliance'){
+     const row=restored.find(x=>x.id===entry.id)||getRecord(entry.id);
+     if(!row||entry.deletedAt>(row.updatedAt||''))recordStore.delete(entry.id);
+    }else{
+     const incoming=incomingAccounts.find(x=>x.id===entry.id);
+     const local=websiteAccounts.find(x=>x.id===entry.id);
+     const last=[incoming,local].filter(Boolean).sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')))[0];
+     if(!last||entry.deletedAt>(last.updatedAt||''))accountStore.delete(entry.id);
+    }
+   }
+   metaStore.put({id:'syncTombstones',items:[...deleted.values()]});
+   if(incomingVault&&(!vaultMeta||!websiteAccounts.length))metaStore.put(incomingVault);
+  }catch(error){try{tx.abort()}catch{}reject(error);return}
+  tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Restore was interrupted'));
  });
- lockVault(true);await refresh();closeModal(true);renderHome();toast(`Restored ${restored.length} appliances and ${incomingAccounts.length} encrypted website accounts.`);return true;
+ lockVault(true);await refresh();
+ if(!automatic){closeModal(true);renderHome();toast('Records restored to this device.');}
+ else if(!modalKind){if(currentView==='notes')renderFollowUps();else if(currentView==='logins')renderLogins();else renderHome();}
+ return true;
 }
 
 async function downloadClaimZip() {
@@ -939,12 +995,12 @@ async function saveAccount(){
  const previous=websiteAccounts.find(a=>a.id===accountEditor.id);
  const a={id:accountEditor.id,brand,siteUrl,secretBlob:await encryptSecret(vaultKey,JSON.stringify(secrets),accountEditor.id),createdAt:previous?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
  await storeAction(ACCOUNTS_STORE,'readwrite',st=>st.put(a));
- accountEditor=null;closeModal(true);await refresh();window.WarrantyCloud?.scheduleUpload?.();renderLogins();touchVault();toast('Login encrypted and saved on this device.');
+ accountEditor=null;closeModal(true);await refresh();window.WarrantyCloud?.scheduleUpload?.();renderLogins();touchVault();toast('Login encrypted and saved. Cloud sync runs automatically.');
 }
 async function deleteAccount(id){
  const a=websiteAccounts.find(a=>a.id===id);
  if(!a||!window.confirm(`Delete ${a.brand} login? Linked appliances will remain, without their website link.`))return;
- await storeAction(ACCOUNTS_STORE,'readwrite',st=>st.delete(id));
+ await deleteWithTombstone(ACCOUNTS_STORE,id,'account');
  for(const r of appliances.filter(r=>r.websiteAccountId===id)){r.websiteAccountId='';await putRecord(r);}
  accountEditor=null;closeModal(true);await refresh();window.WarrantyCloud?.scheduleUpload?.();renderLogins();toast('Website login deleted.');
 }
@@ -1030,8 +1086,8 @@ async function handleAction(button) {
   const files=editor?.draft.files||getRecord(detailId)?.files||[];const f=files.find(x=>x.id===button.dataset.file);if(f){if(!(f.blob instanceof Blob)||!f.blob.size){toast('Original file missing on this device. Restore an encrypted backup.');break;}const link=URL.createObjectURL(f.blob);window.open(link,'_blank','noopener,noreferrer');setTimeout(()=>URL.revokeObjectURL(link),60000);}break;
  }
  case 'delete-record':{
-  const r=getRecord(id);if(r&&window.confirm(`Permanently delete "${r.productName||r.model}" and all its saved files from this device?`)){
-   await deleteRecord(id);closeModal(true);renderHome();toast('Appliance deleted from this device.');
+  const r=getRecord(id);if(r&&window.confirm(`Delete "${r.productName||r.model}" across synced devices? Older encrypted recovery copies are retained.`)){
+   await deleteRecord(id);closeModal(true);renderHome();toast('Appliance deleted locally. The change will sync automatically.');
   }break;
  }
  case 'copy':await copyText(button.dataset.value||'');break;
@@ -1081,6 +1137,7 @@ document.addEventListener('input',()=>touchVault());
  try{
   if(!('indexedDB'in window))throw new Error('IndexedDB is unavailable');
   db=await openDB();await refresh();renderHome();
+   void window.WarrantyCloud?.start?.().catch(error=>console.warn('Cloud reconnect will retry:',error?.message||error));
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js',{scope:'/WarrantyEase/'}).catch(()=>{});
  }catch(err){
   console.error(err);

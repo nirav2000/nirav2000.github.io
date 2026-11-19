@@ -1,6 +1,6 @@
 {
-  "version": "0.7.3",
-  "release": "minimal-wallet-home",
+  "version": "0.8.0",
+  "release": "automatic-encrypted-sync",
   "dataPublished": false,
-  "sourceSha": "f16d6123ba3954c843cdb783511e486d4d281a43"
+  "sourceSha": "829ed6fff1f9d9856caea6ae7c932df73666564e"
 }
