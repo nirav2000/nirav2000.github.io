@@ -7,6 +7,8 @@ on:
       - WarrantyEase/followups.js
       - WarrantyEase/followups-ui.js
       - WarrantyEase/followups.css
+      - WarrantyEase/style.css
+      - WarrantyEase/wallet.css
       - WarrantyEase/index.html
       - .github/workflows/warranty-ease-notes-browser.yml
       - .github/warranty-ease-fixtures/test-followups-browser.cjs
@@ -39,7 +41,7 @@ jobs:
           trap 'kill "$SERVER" 2>/dev/null || true' EXIT
           sleep 2
           curl --fail --silent http://127.0.0.1:8822/WarrantyEase/version.json >/tmp/we-notes-version.json
-          node -e 'const v=require("/tmp/we-notes-version.json");if(v.version!=="0.7.3")throw Error("Wrong app version for notes browser test")'
+          cmp /tmp/warranty-notes-version.json WarrantyEase/version.json
           node .github/warranty-ease-fixtures/test-followups-browser.cjs
       - name: Save synthetic screenshots only if a test failed
         if: failure()
