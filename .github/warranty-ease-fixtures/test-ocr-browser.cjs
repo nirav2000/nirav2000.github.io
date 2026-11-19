@@ -26,9 +26,8 @@ async function run(name){
   assert.equal(await page.locator('[data-field="model"]').inputValue(),'');
   await page.locator('input[data-file-type="label"]').last().setInputFiles(label);
   await waitForOCR(page,'Found');
-  const ocr=await page.locator('#ocr-message').innerText();
-  assert.match(ocr,/F4Y511WWLA1/);
-  assert.match(ocr,/1234AB567890/);
+  assert.match(await page.locator('[data-ocr-edit="model"]').inputValue(),/^F4Y511WWLA1/);
+  assert.equal(await page.locator('[data-ocr-edit="serial"]').inputValue(),'1234AB567890');
   assert.equal(await page.locator('[data-field="model"]').inputValue(),'','OCR must never silently overwrite model');
   await page.locator('[data-action="ocr-apply"]').click();
   const proposedModel=await page.locator('[data-field="model"]').inputValue();
@@ -36,9 +35,8 @@ async function run(name){
   assert.equal(await page.locator('[data-field="serial"]').inputValue(),'1234AB567890');
   await page.locator('[data-action="next"]').click();
   await page.locator('input[data-file-type="receipt"]').last().setInputFiles(receipt);
-  await page.waitForFunction(()=>document.getElementById('ocr-message')?.textContent?.includes('449.00'),undefined,{timeout});
-  const receiptResults=await page.locator('#ocr-message').innerText();
-  assert.match(receiptResults,/449.00/);
+  await page.locator('[data-ocr-edit="price"]').waitFor({timeout});
+  assert.equal(await page.locator('[data-ocr-edit="price"]').inputValue(),'449.00');
   assert.equal(await page.locator('[data-field="purchaseDate"]').inputValue(),'','Receipt date must be user-approved');
   await page.locator('[data-action="ocr-apply"]').click();
   assert.equal(await page.locator('[data-field="purchaseDate"]').inputValue(),'2026-11-12');
@@ -47,7 +45,25 @@ async function run(name){
   await page.waitForFunction(()=>!!document.querySelector('.detail-block'));
   await page.locator('[data-action="close"]').first().click();
   await page.reload({waitUntil:'domcontentloaded'});
-  await page.waitForSelector('.home-utility');
+  const saved=page.locator('.appliance-card').filter({hasText:proposedModel});
+  await saved.waitFor();
+  await saved.locator('[data-action]').first().click();
+  await page.locator('.detail-block').first().waitFor();
+  assert.match(await page.locator('.modal').innerText(),/1234AB567890/);
+  await page.locator('.modal .close-btn').click();
+  await page.locator('.home-add').click();
+  await page.locator('[data-field="productName"]').fill('Email receipt regression');
+  await page.locator('[data-action="next"]').click();
+  await page.locator('input[data-file-type="receipt"]').last().setInputFiles({
+   name:'order.eml',mimeType:'message/rfc822',buffer:Buffer.from('Order number: EMAIL12345\nTotal: GBP 12.34')
+  });
+  await page.locator('[data-ocr-edit="orderNumber"]').waitFor();
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.locator('.appliance-card').filter({hasText:'Email receipt regression'}).locator('[data-action="view"]').click();
+  await page.locator('[data-action="edit"]').click();
+  await page.locator('[data-action="next"]').click();
+  assert.equal(await page.locator('[data-ocr-edit="orderNumber"]').inputValue(),'EMAIL12345');
+  assert.equal(await page.locator('[data-field="orderNumber"]').inputValue(),'');
   console.log(name+': OCR label + receipt, approval, save and reload PASS');
   if(errors.length)console.log(name+' browser notes:',errors.slice(0,8));
  }catch(error){

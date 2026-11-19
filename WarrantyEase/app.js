@@ -413,7 +413,7 @@ async function saveEditor() {
  try {
   // Preserve manually entered date. Computed date is shown in the UI and used in claim views.
   await putRecord(editor.draft);
-  const id=editor.draft.id;editor=null;closeModal(true);renderHome();toast('Appliance saved on this device. Remember to export a backup.');
+  const id=editor.draft.id;editor=null;closeModal(true);renderHome();toast('Appliance saved on this device.');
   showDetail(id);
  }catch(err){console.error(err);toast('Unable to save. Check browser storage space and try again.');}
 }
@@ -544,35 +544,46 @@ async function copyText(value) {
 }
 
 async function handlePickedFiles(input) {
- if(!editor)return;
+ const owner=editor;
+ if(!owner)return;
+ const recordId=owner.draft.id;
  const type=input.dataset.fileType;const files=Array.from(input.files||[]);input.value='';
  if(!files.length)return;
  const loaded=[];
  for(const file of files){
   if(file.size>60*1024*1024){toast(`${file.name} exceeds the 60 MB safety limit. Keep the original externally and import a smaller still-legible copy.`);continue;}
   const attach={id:uid(),name:file.name||`${type}-${Date.now()}.jpg`,type,mime:file.type||'application/octet-stream',size:file.size,blob:file,ocrText:'',addedAt:new Date().toISOString()};
-  editor.draft.files.push(attach);loaded.push(attach);
+  owner.draft.files.push(attach);loaded.push(attach);
  }
- if(loaded.length){
-  editor.draft.updatedAt=new Date().toISOString();
-  await dbAction('readwrite',store=>store.put(editor.draft));
+ if(!loaded.length)return;
+ owner.draft.updatedAt=new Date().toISOString();
+  await dbAction('readwrite',store=>store.put(owner.draft));
   await refresh();window.WarrantyCloud?.scheduleUpload?.();
- }
-  editor.dirty=true;renderEditor(false);toast(`${loaded.length} original file${loaded.length===1?'':'s'} saved on this device. Review extracted details, then save the appliance.`);
-  void prepareDisplayImages(editor.draft.id,loaded); // Derived previews never replace original evidence.
+  if(editor===owner){owner.dirty=true;renderEditor(false);toast(`${loaded.length} original file${loaded.length===1?'':'s'} saved on this device. Review extracted details, then save the appliance.`);}
+  void prepareDisplayImages(recordId,loaded); // Derived previews never replace original evidence.
  if(type==='receipt'){
   for(const f of loaded.filter(f=>/\.(eml|txt)$/i.test(f.name)||/^(text\/plain|message\/rfc822)/i.test(f.mime))){
    try{
-    const text=await f.blob.text();f.ocrText=text.slice(0,20000);
-    const hits=window.WarrantyOCRExtract?.parseReceipt?.(text)||parseReceipt(text),found=Object.entries(hits).filter(([key,value])=>value&&!editor.draft[key]);
-    for(const [key,value] of found)editor.suggestions[key]=value;
-    if(found.length){ocrMessage=`Found ${found.length} possible purchase details in the saved email/text. Tap Use suggested details after checking them.`;renderEditor(false);}
+    const text=(await f.blob.text()).slice(0,20000);
+    const hits=window.WarrantyOCRExtract?.parseReceipt?.(text)||parseReceipt(text);
+    const analysis={ocrText:text,ocrSuggestions:hits,ocrAt:new Date().toISOString()};
+    Object.assign(f,analysis);
+    await patchStoredFile(recordId,f.id,analysis);
+    await refresh();
+    if(editor?.draft.id===recordId){
+     const target=editor.draft.files.find(item=>item.id===f.id);
+     if(!target)continue;
+     Object.assign(target,analysis);
+     const found=Object.entries(hits).filter(([key,value])=>value&&!editor.draft[key]);
+     for(const [key,value] of found)editor.suggestions[key]=value;
+     if(found.length){ocrMessage='Check the purchase details from your receipt, then tap Apply reviewed details.';renderEditor(false);}
+    }
    }catch(error){console.warn('Text attachment could not be parsed',error);}
   }
  }
  if(loaded.some(f=>f.mime.startsWith('image/'))){
   const images=loaded.filter(f=>f.mime.startsWith('image/'));
-  if(images.length){for(const f of images)enqueueOcr(editor.draft.id,f.id);ocrMessage='Photo saved. Scanning text privately on this device...';updateOcr(ocrMessage);runOcrQueue().catch(error=>console.warn('Photo scanning stopped',error));}
+  if(images.length){for(const f of images)enqueueOcr(recordId,f.id);if(editor===owner)updateOcr('Photo saved. Scanning text privately on this device...');runOcrQueue().catch(error=>console.warn('Photo scanning stopped',error));}
  }
 }
 function updateOcr(text) {
@@ -622,7 +633,7 @@ async function runOcrQueue() {
       await patchStoredFile(work.editorId,work.fileId,{ocrText:text,ocrSuggestions:hits,ocrKeyLines:file.ocrKeyLines,ocrAt:file.ocrAt});
       await refresh();window.WarrantyCloud?.scheduleUpload?.();
     }
-    const message=count?`Found ${count} possible detail${count===1?'':'s'}. Check the original image and tap Use suggested details.`:'Scan finished. No clear details detected. Try a sharper, closer photo or enter the details manually.';
+    const message=count?`Found ${count} possible detail${count===1?'':'s'}. Check the original image and tap Apply reviewed details.`:'Scan finished. No clear details detected. Try a sharper, closer photo or enter the details manually.';
     ocrMessage=message;
     if(freshEditor&&modalKind==='editor')renderEditor(false);
     else if(!freshEditor)toast('Photo scan complete. Reopen the appliance to review suggestions.');

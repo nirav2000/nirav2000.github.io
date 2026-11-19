@@ -1,6 +1,6 @@
 {
-  "version": "0.8.1",
-  "release": "automatic-sync-session-recovery",
+  "version": "0.8.2",
+  "release": "receipt-scan-recovery",
   "dataPublished": false,
-  "sourceSha": "0e4698e8afe8d71a08493997a256bb26fb0aac8d"
+  "sourceSha": "44c2cf00a1597e73208580a7792a5fa478eb653d"
 }
