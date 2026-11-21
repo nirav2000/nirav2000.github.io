@@ -33,35 +33,34 @@
         <button class="nav-link active" data-action="home">My appliances</button>
         <button class="nav-link" data-action="notes">Notes &amp; follow-ups</button>
         <button class="nav-link" data-action="logins">Website logins</button>
-        <button class="nav-link" data-action="settings">Backup & privacy</button>
+        <button class="nav-link" data-action="settings">Sync & privacy</button>
       </nav>
       <div class="header-actions">
         <span class="local-pill"><span class="local-dot"></span> Available offline</span>
       </div>
       <details class="wallet-menu" id="wallet-menu">
-        <summary aria-label="More: products, search, notes, website logins and backup" title="More options">&#8943;</summary>
+        <summary aria-label="More: products, search, notes, website logins and sync" title="More options">&#8943;</summary>
         <div class="wallet-menu-panel" aria-label="More options">
           <button type="button" data-action="home">Products</button>
           <button type="button" data-action="search">Search products</button>
           <button type="button" data-action="notes">Notes &amp; follow-ups</button>
           <button type="button" data-action="logins">Website logins</button>
-          <button type="button" data-action="settings">Backup &amp; privacy</button>
+          <button type="button" data-action="settings">Sync &amp; privacy</button>
         </div>
       </details>
     </header>
 
     <main id="main" class="main" aria-live="polite"></main>
-    <footer class="site-footer"><span>Made for peace of mind, not paperwork.</span><span>Private first. No account needed.</span></footer>
+    <footer class="site-footer"><span>Made for peace of mind, not paperwork.</span><span>Private on your device. Sync when connected.</span></footer>
   </div>
   <nav class="mobile-nav" aria-label="Mobile navigation">
     <button data-action="home" class="mobile-nav-item active"><span data-icon="home"></span>Home</button>
     <button data-action="notes" class="mobile-nav-item"><span data-icon="calendar"></span>Notes</button>
     <button data-action="logins" class="mobile-nav-item"><span data-icon="lock"></span>Logins</button>
-    <button data-action="settings" class="mobile-nav-item"><span data-icon="settings"></span>Backup</button>
+    <button data-action="settings" class="mobile-nav-item"><span data-icon="settings"></span>Sync</button>
   </nav>
   <div id="modal-root"></div>
   <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
-  <input type="file" id="restore-input" accept=".zip,application/zip" hidden>
   <script src="ocr-control.js" defer></script>
   <script src="ocr-extract.js" defer></script>
   <script src="ocr-crop.js" defer></script>

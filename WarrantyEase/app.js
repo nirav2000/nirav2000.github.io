@@ -126,11 +126,11 @@ function patchStoredFile(recordId,fileId,changes){return new Promise((resolve,re
  req.onsuccess=()=>{const row=req.result,attached=row?.files?.find(f=>f.id===fileId);
   if(attached){Object.assign(attached,changes);if(Object.keys(changes).some(k=>k!=='previewBlob'))row.updatedAt=new Date().toISOString();store.put(row);}
  };
- tx.oncomplete=()=>{if(Object.keys(changes).some(key=>key!=='previewBlob'))window.WarrantyCloud?.scheduleUpload?.();resolve(true)};tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Attachment update could not finish'));
+ tx.oncomplete=()=>{if(Object.keys(changes).some(key=>key!=='previewBlob')||changes.previewBlob instanceof Blob)window.WarrantyCloud?.scheduleUpload?.();resolve(true)};tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Attachment update could not finish'));
  });}
 async function prepareDisplayImages(recordId,files){
  for(const f of files){
-  if(!f.mime.startsWith('image/')||!window.WarrantyMedia?.createPreview)continue;
+  if(!f.mime.startsWith('image/')||window.WarrantyMedia?.isBlob?.(f.previewBlob)||!window.WarrantyMedia?.createPreview)continue;
   try{
    const preview=await window.WarrantyMedia.createPreview(f.blob,{type:f.type});if(!preview)continue;
    await patchStoredFile(recordId,f.id,{previewBlob:preview});
@@ -292,26 +292,24 @@ function renderGrid() {
   const days=exp?(Date.parse(exp)-Date.parse(today()))/86400000:Infinity;
   const status=note?note.title:exp?((r.expiryDate?(days<0?'Ended':'Expires'):'Estimated end')+' · '+fdate(exp)):'Expiry unknown';
   const tone=note?'followup':days<0?'ended':days<=30?'soon':'normal';
-  const image=blob?`<img loading="lazy" decoding="async" data-warranty-photo="true" data-card-photo="${photo.type==='reference'?'catalogue':'installed'}" alt="" src="${previewUrl(blob,'main')}">`:cardIcon(name||r.category);
+  const image=blob?`<img loading="lazy" decoding="async" data-warranty-photo="true" data-card-photo="${photo.type==='reference'?'catalogue':'installed'}" alt="" data-warranty-file="${esc(photo.id)}" src="${previewUrl(blob,'main')}">`:cardIcon(name||r.category);
   return `<article class="appliance-card"><button class="appliance-open" data-action="view" data-id="${esc(r.id)}"><div class="card-image ${blob?'has-photo':'no-photo'}">${image}</div><div class="card-copy"><h3 class="card-title">${esc(title)}</h3>${subtitle?`<p class="we-card-model">${esc(subtitle)}</p>`:''}<p class="card-status" data-tone="${tone}">${esc(status)}</p></div></button></article>`;
  }).join('')}</div>`;
 }
 function renderSettings() {
- currentView='settings';setNavState();clearUrls('main');
- root.innerHTML=`<div class="settings-top"><div><div class="eyebrow"><span class="eyebrow-dot"></span> Your records, your control</div><h1>Backup & privacy.</h1><p>A little preparation now means you can find your records years from now.</p></div>${ico('lock','welcome-doodle')}</div>
- <div id="cloud-ui">${window.WarrantyCloud?.panel?.()||''}</div>
- <div class="settings-grid">
- <section class="settings-card settings-full"><h3>Shared Apps monitoring</h3><p class="note-muted">The shared Auth, PWA and developer-only Version Lab use our Apps platform. Optional App Monitor and Firebase usage statistics count app activity and encrypted backup index operations only; no receipt images, serial numbers, OCR text or website passwords are sent.</p><label class="we-consent-control"><input type="checkbox" id="we-monitor-consent" ${window.WarrantyPlatform?.enabled?.()?'checked':''}> Enable shared App Monitor and Firebase usage logging on this device</label></section>
- <section class="settings-card"><div class="settings-icon">${ico('download')}</div><h3>Save a portable encrypted archive</h3><p>Back up every record, serial label, photo, receipt, warranty file and encrypted website login. The ZIP includes an independent offline recovery page you can use even if this app vanishes.</p><button class="btn btn-dark" data-action="backup">${ico('lock')} Create encrypted archive</button><p class="note-muted">${appliances.length} appliance record${appliances.length===1?'':'s'} + ${websiteAccounts.length} website login${websiteAccounts.length===1?'':'s'}. Save a copy on another device or drive.</p><button class="btn btn-ghost btn-sm" data-action="backup-plain">Export readable ZIP (unencrypted)</button></section>
- <section class="settings-card"><div class="settings-icon">${ico('upload')}</div><h3>Recover from an archive</h3><p>Import a previous encrypted or readable Warranty Ease ZIP. This also restores the website-login vault, so retain its separate passphrase.</p><button class="btn btn-line" data-action="restore">${ico('upload')} Choose backup ZIP</button><p class="note-muted">An encrypted backup can also be recovered using the RECOVER.html inside the archive, without this app.</p></section>
- <section class="settings-card"><div class="settings-icon">${ico('shield')}</div><h3>Keep records on this device</h3><p>Original appliance photos and receipts stay in your device database. Once you connect encrypted cloud backup, copies are encrypted locally and sent to your private Cloudflare storage. Check the sync status before relying on another device.</p><button class="btn btn-line" data-action="persist">Request persistent storage</button><p class="note-muted" id="storage-info">Checking available space...</p><p class="we-storage-audit" id="we-storage-audit" role="status">Checking original photo files...</p></section>
- <section class="settings-card"><div class="settings-icon">${ico('key')}</div><h3>Warranty website logins</h3><p>Keep website URLs and encrypted sign-in details together. One LG account can be shared by both LG appliances. You must unlock the vault to read credentials.</p><button class="btn btn-line" data-action="logins">${ico('lock')} Manage website logins</button><p class="note-muted">${websiteAccounts.length} protected website account${websiteAccounts.length===1?'':'s'} on this device.</p></section>
- <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Photo text recognition</h3><p>Model-label and receipt photos are scanned automatically on your device, including offline once the scanner assets have been cached.</p><p class="note-muted">The original photo stays saved. Nothing extracted is filled into your fields until you approve it. Use Scan again for difficult photos; clear, close-up images work best.</p><button class="btn btn-line btn-sm" data-action="ocr-offline-prepare">Prepare scanner for offline use</button><p class="note-muted" id="ocr-offline-status">Optional one-time download. After preparation, scanning works without an internet connection.</p></section>
- <section class="settings-card settings-full"><h3>Protect your records for years</h3><ul class="privacy-list"><li>This installed app retains local copies in its browser database, and its interface can open offline after first load. Browser storage can still be removed, especially after long periods of non-use.</li><li>Make an encrypted, portable archive after each change. Store two copies in different safe locations (for example your computer and a separate backup drive).</li><li>Save the archive passphrase and login-vault passphrase somewhere you can retrieve them. These passphrases cannot be reset from the server.</li><li>Never place receipts, serial labels or passwords in a public code repository. Encrypted cloud backups can be enabled with your existing account; check the current sync status before relying on them.</li><li>The app prepares claims but never sends website passwords or submits emails automatically.</li></ul><div class="warning-note">Cloud backup is optional and depends on Firebase and Cloudflare being available. The installed device and exported recovery archives remain your independent copies.</div></section>
- </div>`;
+  currentView='settings';setNavState();clearUrls('main');
+  root.innerHTML=`<div class="settings-top"><div><div class="eyebrow"><span class="eyebrow-dot"></span> Private, automatic and available offline</div><h1>Sync &amp; privacy.</h1><p>Your appliances, photos, receipts and notes stay on this device and automatically reconcile with your encrypted cloud copy.</p></div>${ico('lock','welcome-doodle')}</div>
+  <div id="cloud-ui">${window.WarrantyCloud?.panel?.()||''}</div>
+  <div class="settings-grid">
+   <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Available on this device</h3><p>Original pictures and documents are kept locally. The newest verified encrypted cloud copy is also saved on this device for automatic repair when needed.</p><p class="note-muted" id="storage-info">Checking device storage...</p><p class="we-storage-audit" id="we-storage-audit" role="status">Checking photos...</p></section>
+   <section class="settings-card"><div class="settings-icon">${ico('key')}</div><h3>Website logins</h3><p>Website credentials remain encrypted separately from warranty documents.</p><button class="btn btn-line" data-action="logins">${ico('lock')} Manage website logins</button></section>
+   <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Photo text recognition</h3><p>Read model labels and receipts on this device. Your original image remains unaltered.</p><button class="btn btn-line btn-sm" data-action="ocr-offline-prepare">Prepare scanner for offline use</button><p class="note-muted" id="ocr-offline-status">The scanner works without internet once its assets are cached.</p></section>
+   <section class="settings-card"><div class="settings-icon">${ico('shield')}</div><h3>How sync protects your records</h3><p>Changes are saved locally first and encrypted before they reach Cloudflare. Each device automatically checks for missing originals and reconciles records. Historical encrypted cloud copies are retained privately for recovery, without a backup manager or manual restore steps.</p><p class="note-muted">Sync runs while Warranty Ease is open and online. iOS may pause closed apps. Do not erase device storage while an issue is being repaired.</p></section>
+   <section class="settings-card settings-full"><h3>Optional application diagnostics</h3><p class="note-muted">Shared App Monitor and Firebase activity counts exclude your warranty images, serial numbers and passwords.</p><label class="we-consent-control"><input type="checkbox" id="we-monitor-consent" ${window.WarrantyPlatform?.enabled?.()?'checked':''}> Enable anonymous app-operation diagnostics on this device</label></section>
+  </div>`;
   updateStorageEstimate();
   const files=appliances.flatMap(r=>r.files||[]),audit=window.WarrantyMedia?.inspect?.(files);
-  const note=document.getElementById('we-storage-audit');if(note&&audit)note.textContent=`${audit.originals} original files stored locally (${fmtSize(audit.bytes)}). ${audit.previews} compact previews. ${audit.missing?audit.missing+' missing originals — do not delete any backups; restore affected evidence.':'No missing originals detected in saved records.'}`;
+  const note=document.getElementById('we-storage-audit');if(note&&audit)note.textContent=`${audit.originals} original files (${fmtSize(audit.bytes)}). ${audit.previews} display previews. ${audit.missing?audit.missing+' originals need automatic cloud repair.':'All recorded originals are present locally.'}`;
 }
 async function updateStorageEstimate() {
  const box=document.getElementById('storage-info');if(!box)return;
@@ -347,8 +345,8 @@ function filesMarkup(types) {
 function fileRow(f,editable=false) {
  const isImage=f.mime?.startsWith('image/'),original=window.WarrantyMedia?.isBlob?.(f.blob);
  const preview=isImage?mediaBlob(f):null;
- const thumb=preview?`<img data-warranty-photo="true" src="${previewUrl(preview,'modal')}" alt="">`:ico(original?'file':'alert');
- return `<div class="file-row"><div class="file-thumb">${thumb}</div><div class="file-data"><strong title="${esc(f.name)}">${esc(f.name)}</strong><span>${esc(fileLabel(f.type))} &middot; ${original?fmtSize(f.blob.size):'Original unavailable'}${f.source==='manufacturer'?' &middot; Manufacturer reference':''}${f.ocrText?' &middot; Text scanned':''}</span>${!original?`<span class="we-photo-warning">Restore from an encrypted backup if available</span>`:''}</div><div class="file-actions"><button class="tiny-btn" data-action="file-view" data-file="${esc(f.id)}" aria-label="View file" ${original?'':'disabled'}>View</button>${editable&&original&&isImage?`<button class="tiny-btn scan-btn" data-action="file-scan" data-file="${esc(f.id)}">${f.ocrText?'Scan again':'Read text'}</button><button class="tiny-btn scan-btn" data-action="file-crop" data-file="${esc(f.id)}">Crop &amp; scan</button>`:''}${editable?`<button class="tiny-btn warn" data-action="file-remove" data-file="${esc(f.id)}" aria-label="Remove file">${ico('trash')}</button>`:''}</div></div>`;
+ const thumb=preview?`<img data-warranty-photo="true" data-warranty-file="${esc(f.id)}" src="${previewUrl(preview,'modal')}" alt="">`:ico(original?'file':'alert');
+ return `<div class="file-row"><div class="file-thumb">${thumb}</div><div class="file-data"><strong title="${esc(f.name)}">${esc(f.name)}</strong><span>${esc(fileLabel(f.type))} &middot; ${original?fmtSize(f.blob.size):'Original unavailable'}${f.source==='manufacturer'?' &middot; Manufacturer reference':''}${f.ocrText?' &middot; Text scanned':''}</span>${!original?`<span class="we-photo-warning">Automatic cloud repair pending</span>`:''}</div><div class="file-actions"><button class="tiny-btn" data-action="file-view" data-file="${esc(f.id)}" aria-label="View file" ${original?'':'disabled'}>View</button>${editable&&original&&isImage?`<button class="tiny-btn scan-btn" data-action="file-scan" data-file="${esc(f.id)}">${f.ocrText?'Scan again':'Read text'}</button><button class="tiny-btn scan-btn" data-action="file-crop" data-file="${esc(f.id)}">Crop &amp; scan</button>`:''}${editable?`<button class="tiny-btn warn" data-action="file-remove" data-file="${esc(f.id)}" aria-label="Remove file">${ico('trash')}</button>`:''}</div></div>`;
 }
 function stepMarkup() {return `<div class="stepper">${['Appliance','Purchase','Warranty'].map((s,i)=>`<div class="step ${editor.step===i?'active':i<editor.step?'done':''}"><div class="step-num">${i<editor.step?ico('check'):i+1}</div><span>${s}</span></div>`).join('')}</div>`;}
 function editorStepContent() {
@@ -443,7 +441,7 @@ async function saveEditor() {
  try {
   // Preserve manually entered date. Computed date is shown in the UI and used in claim views.
   await putRecord(editor.draft);
-  const id=editor.draft.id;editor=null;closeModal(true);renderHome();toast('Appliance saved on this device.');
+  const id=editor.draft.id;editor=null;closeModal(true);renderHome();toast('Saved locally. Sync runs automatically.');
   showDetail(id);
  }catch(err){console.error(err);toast('Unable to save. Check browser storage space and try again.');}
 }
@@ -473,7 +471,7 @@ function showDetail(id) {
  const r=getRecord(id);if(!r)return;
  editor=null;claim=null;detailId=id;modalKind='detail';clearUrls('modal');
  const pic=preferredPicture(r),photo=mediaBlob(pic);
-  const img=photo?`<img data-warranty-photo="true" src="${previewUrl(photo,'modal')}" alt="${esc(r.productName)}">`:cardIcon(r.category);
+  const img=photo?`<img data-warranty-photo="true" data-warranty-file="${esc(pic.id)}" src="${previewUrl(photo,'modal')}" alt="${esc(r.productName)}">`:cardIcon(r.category);
  modalRoot.innerHTML=`<div class="modal-overlay"><section class="modal modal-narrow" role="dialog" aria-modal="true" aria-label="Appliance details">
  <div class="modal-header"><div><span class="modal-label">${esc(r.category||'Home appliance')}</span><h2>${esc(r.productName||r.brand||r.model||'Appliance')}</h2><p>${esc([r.brand,r.model].filter(Boolean).join(' / ')||'Complete your details whenever you can')}</p></div><button class="close-btn" data-action="close" aria-label="Close">${ico('close')}</button></div>
  <div class="modal-content"><div class="details-cover">${img}<span class="status-bubble ${isExpired(r)?'expired':isReady(r)?'ready':''}">${isExpired(r)?'Warranty ended':isReady(r)?'Claim-ready':'Needs details'}</span></div>
@@ -777,7 +775,17 @@ async function createRawBackupZip(){
  let readable='WARRANTY EASE - APPLIANCE INDEX\nExported: '+manifest.exportedAt+'\n\n';
  for(const r of appliances){
   const clone={...r,files:[]};
-  for(const f of r.files||[]){const path=`files/${r.id}/${f.id}_${safeFileName(f.name)}`;items.push({name:path,data:f.blob});if(!(f.blob instanceof Blob)||!f.blob.size)throw Error('Missing original evidence file '+f.name+'. Cloud backup stopped before falsely marking a complete copy.');const {blob,previewBlob,...meta}=f;clone.files.push({...meta,path});}
+  for(const f of r.files||[]){
+    if(!(f.blob instanceof Blob)||!f.blob.size)throw Error('Missing original evidence file '+f.name+'. Automatic repair is required before syncing.');
+    const path=`files/${r.id}/${f.id}_${safeFileName(f.name)}`;
+    items.push({name:path,data:f.blob});
+    const {blob,previewBlob,...meta}=f;
+    if(previewBlob instanceof Blob&&previewBlob.size&&previewBlob.type==='image/jpeg'){
+      const previewPath=`previews/${r.id}/${f.id}.jpg`;
+      items.push({name:previewPath,data:previewBlob});
+      clone.files.push({...meta,path,previewPath});
+    }else clone.files.push({...meta,path});
+   }
   manifest.records.push(clone);
   readable+=`${r.productName||'Appliance'} (${r.brand||'-'})\nModel: ${r.model||'-'}\nSerial: ${r.serial||'-'}\nProduct code: ${r.productCode||'-'}\nPurchased: ${r.purchaseDate||'-'} from ${r.retailer||'-'}\nInvoice/order: ${r.orderNumber||'-'}\nWarranty end (check actual terms): ${computedExpiry(r)||'-'}\nRegistration: ${r.registrationDate||'-'} | ${r.registrationMethod||'-'} | ${r.registrationReference||'-'}\nManufacturer support: ${r.supportEmail||'-'} | ${r.supportPhone||'-'} | ${r.supportUrl||'-'}\nSeller support: ${r.sellerEmail||'-'} | ${r.sellerPhone||'-'} | ${r.sellerUrl||'-'}\nLinked login: ${websiteAccounts.find(a=>a.id===r.websiteAccountId)?.brand||'none'} (credentials held encrypted in backup JSON)\nFiles: ${(r.files||[]).map(f=>f.name).join(', ')||'-'}\n\n`;
  }
@@ -851,25 +859,89 @@ async function restoreEncryptedBackup(){
   pendingImportEntries=null;
  }catch(e){console.error(e);toast(e.name==='OperationError'?'Incorrect archive passphrase or damaged backup.':`Restore failed: ${e.message||'Invalid backup'}`);}
 }
-function mergeRestoredRecord(incoming,local){
- if(!local)return incoming;
- const newerLocal=Date.parse(local.updatedAt||'')>Date.parse(incoming.updatedAt||'');
- const files=new Map((incoming.files||[]).map(f=>[f.id,f]));
- for(const f of local.files||[]){
-  const remote=files.get(f.id);
-  if(!remote){files.set(f.id,f);continue;}
-  const localOriginal=f.blob instanceof Blob&&f.blob.size>0;
-  const remoteOriginal=remote.blob instanceof Blob&&remote.blob.size>0;
-  if(localOriginal&&!remoteOriginal){files.set(f.id,f);continue;}
-  if(localOriginal&&remoteOriginal&&f.blob.size!==remote.blob.size){
-   // Never discard different physical evidence in an ID collision during restore.
-   let otherId=f.id+'-device';while(files.has(otherId))otherId+='-1';
-   files.set(otherId,{...f,id:otherId,name:'Local copy - '+f.name});
+async function mergeRestoredRecord(incoming,local){
+  if(!local)return incoming;
+  // Record timestamps choose the primary values; older, nonempty fields survive.
+  // File IDs are immutable: never let a stale cloud version discard local bytes.
+  const newerLocal=(Date.parse(local.updatedAt||'')||0)>=(Date.parse(incoming.updatedAt||'')||0);
+  const main=newerLocal?local:incoming,other=newerLocal?incoming:local,merged={...main};
+  for(const [field,value] of Object.entries(other)){
+    if(['id','files','followUps','updatedAt'].includes(field))continue;
+    if((merged[field]===null||merged[field]===undefined||merged[field]==='')&&value!==null&&value!==undefined&&value!=='')merged[field]=value;
   }
- }
- return {...(newerLocal?local:incoming),files:[...files.values()],followUps:window.WarrantyFollowUps?.merge?.(incoming.followUps,local.followUps)||[...(incoming.followUps||[]),...(local.followUps||[])]};
+  const files=new Map((main.files||[]).map(f=>[f.id,f]));
+  const good=f=>f?.blob instanceof Blob&&f.blob.size>0;
+  const checksum=async blob=>{
+    const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()));
+    return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  };
+  for(const file of other.files||[]){
+    const previous=files.get(file.id);
+    if(!previous){files.set(file.id,file);continue;}
+    if(!good(previous)&&good(file)){files.set(file.id,{...previous,...file});continue;}
+    if(!good(file)||!good(previous)){
+      files.set(file.id,{...file,...previous,previewBlob:previous.previewBlob||file.previewBlob});
+      continue;
+    }
+    let same=previous.blob===file.blob;
+    // A matching file ID or size is not proof of identical evidence: compare
+    // content bytes before deciding which original can safely be discarded.
+    if(!same&&previous.blob.size===file.blob.size)same=await checksum(previous.blob)===await checksum(file.blob);
+    if(!same){
+      // Different physical evidence under one ID: retain both, with a stable
+      // alternate ID so reconciling old archives cannot multiply duplicates.
+      const altId=file.id+'-variant-'+(await checksum(file.blob)).slice(0,12);
+      if(!files.has(altId)||!good(files.get(altId))){
+        files.set(altId,{...file,id:altId,name:'Preserved alternative - '+(file.name||'evidence')});
+      }
+    }else{
+      const chosen={...file,...previous};
+      for(const k of ['previewBlob','ocrText','ocrSuggestions','ocrAt','ocrKeyLines']){
+        if((chosen[k]===undefined||chosen[k]===null||chosen[k]==='')&&file[k]!==undefined)chosen[k]=file[k];
+      }
+      files.set(file.id,chosen);
+    }
+  }
+  return {...merged,files:[...files.values()],
+    followUps:window.WarrantyFollowUps?.merge?.(incoming.followUps,local.followUps)||[...(incoming.followUps||[]),...(local.followUps||[])]};
 }
-
+// Determine whether the locally reconciled state contains information that
+// the newest cloud archive does not yet have. This converges older offline
+// branches without discarding any local-only evidence or notes.
+async function cloudManifestNeedsUpload(zip){
+ const entries=await readZip(zip),file=entries.get('warranty-ease-backup.json');
+ if(!file)throw Error('Cloud state manifest is missing.');
+ const snapshot=JSON.parse(await file.text());
+ if(!Array.isArray(snapshot.records))throw Error('Cloud state manifest is invalid.');
+ const canonical=value=>{
+   if(Array.isArray(value))return value.map(canonical);
+   if(value&&typeof value==='object'){
+     return Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])]));
+   }
+   return value;
+ };
+ const equal=(a,b)=>JSON.stringify(canonical(a))===JSON.stringify(canonical(b));
+ const remote=new Map(snapshot.records.map(r=>[r.id,r]));
+ for(const r of appliances){
+   const old=remote.get(r.id);if(!old)return true;
+   const {files:localFiles=[],...localMeta}=r,{files:remoteFiles=[],...remoteMeta}=old;
+   if(!equal(localMeta,remoteMeta))return true;
+   const remoteFileMap=new Map(remoteFiles.map(f=>[f.id,f]));
+   for(const f of localFiles){
+     const prior=remoteFileMap.get(f.id);if(!prior)return true;
+     const {blob,previewBlob,...localFields}=f;
+     const {path,previewPath,...remoteFields}=prior;
+     if(!equal(localFields,remoteFields))return true;
+     if(previewBlob instanceof Blob&&previewBlob.size&&previewBlob.type==='image/jpeg'&&!previewPath)return true;
+   }
+ }
+ const remoteAccounts=new Map((snapshot.websiteAccounts||[]).map(x=>[x.id,x]));
+ for(const a of websiteAccounts)if(!remoteAccounts.has(a.id)||!equal(a,remoteAccounts.get(a.id)))return true;
+ const deletes=await storeAction(META_STORE,'readonly',store=>store.get('syncTombstones'));
+ const remoteDeletes=new Map((snapshot.deletions||[]).map(x=>[x.kind+':'+x.id,x.deletedAt]));
+ for(const d of deletes?.items||[])if(d.deletedAt>(remoteDeletes.get(d.kind+':'+d.id)||''))return true;
+ return false;
+}
 async function applyRestoredZip(zip,{automatic=false}={}){
  const entries=await readZip(zip),data=entries.get('warranty-ease-backup.json');
  if(!data)throw new Error('The backup manifest is missing');
@@ -895,10 +967,12 @@ async function applyRestoredZip(zip,{automatic=false}={}){
   const row={...r,files:[]};
   for(const f of r.files){
    if(!f.path||!entries.has(f.path))throw new Error('Missing file: '+String(f.name));
-   const {path,...meta}=f;
-   row.files.push({...meta,blob:new Blob([entries.get(path)],{type:meta.mime||'application/octet-stream'})});
+   const {path,previewPath,...meta}=f;
+   const original=new Blob([entries.get(path)],{type:meta.mime||'application/octet-stream'});
+   const preview=previewPath&&entries.has(previewPath)?new Blob([entries.get(previewPath)],{type:'image/jpeg'}):null;
+   row.files.push({...meta,blob:original,...(preview?.size?{previewBlob:preview}:{})});
   }
-  const merged=mergeRestoredRecord(row,getRecord(row.id));
+  const merged=await mergeRestoredRecord(row,getRecord(row.id));
   if((deleted.get('appliance:'+row.id)?.deletedAt||'')>(merged.updatedAt||''))continue;
   restored.push(merged);
  }
@@ -933,6 +1007,10 @@ async function applyRestoredZip(zip,{automatic=false}={}){
   tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Restore was interrupted'));
  });
  lockVault(true);await refresh();
+ for(const record of restored){
+   const missingPreviews=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&f.blob instanceof Blob&&f.blob.size&&!(f.previewBlob instanceof Blob&&f.previewBlob.size));
+   if(missingPreviews.length)void prepareDisplayImages(record.id,missingPreviews).catch(()=>{});
+ }
  if(!automatic){closeModal(true);renderHome();toast('Records restored to this device.');}
  else if(!modalKind){if(currentView==='notes')renderFollowUps();else if(currentView==='logins')renderLogins();else renderHome();}
  return true;
@@ -1124,7 +1202,7 @@ async function handleAction(button) {
  case 'ocr-apply':if(editor){let applied=0;const allowed=new Set(['brand','model','productCode','serial','retailer','orderNumber','purchaseDate','price']);for(const input of modalRoot.querySelectorAll('[data-ocr-edit]')){const key=input.dataset.ocrEdit,value=input.value.trim().slice(0,120);if(!allowed.has(key)||!value)continue;if(editor.draft[key]!==value){editor.draft[key]=value;applied++;}}editor.suggestions={};editor.dirty=true;ocrMessage=applied?`${applied} reviewed detail${applied===1?'':'s'} entered. Verify against the photograph before saving.`:'No details were changed.';renderEditor(false);toast(ocrMessage);}break;
  case 'file-remove':if(editor){editor.draft.files=editor.draft.files.filter(f=>f.id!==button.dataset.file);editor.dirty=true;renderEditor(false);}break;
  case 'file-view':{
-  const files=editor?.draft.files||getRecord(detailId)?.files||[];const f=files.find(x=>x.id===button.dataset.file);if(f){if(!(f.blob instanceof Blob)||!f.blob.size){toast('Original file missing on this device. Restore an encrypted backup.');break;}const link=URL.createObjectURL(f.blob);window.open(link,'_blank','noopener,noreferrer');setTimeout(()=>URL.revokeObjectURL(link),60000);}break;
+  const files=editor?.draft.files||getRecord(detailId)?.files||[];const f=files.find(x=>x.id===button.dataset.file);if(f){if(!(f.blob instanceof Blob)||!f.blob.size){toast('Original unavailable. Automatic cloud repair will retry when connected.');break;}const link=URL.createObjectURL(f.blob);window.open(link,'_blank','noopener,noreferrer');setTimeout(()=>URL.revokeObjectURL(link),60000);}break;
  }
  case 'delete-record':{
   const r=getRecord(id);if(r&&window.confirm(`Delete "${r.productName||r.model}" across synced devices? Older encrypted recovery copies are retained.`)){
@@ -1137,11 +1215,6 @@ async function handleAction(button) {
  case 'claim-email':await emailClaim();break;
  case 'claim-share':await shareClaim();break;
  case 'claim-download':await downloadClaimZip();break;
- case 'backup':await backupAll();break;
- case 'backup-encrypt':await completeEncryptedBackup();break;
- case 'backup-plain':await exportPlainBackup();break;
- case 'restore-decrypt':await restoreEncryptedBackup();break;
- case 'restore':document.getElementById('restore-input').click();break;
  case 'persist':{
   try{if(!navigator.storage?.persist){toast('Storage persistence is unavailable on this browser.');break;}const okay=await navigator.storage.persist();toast(okay?'This browser has granted persistent storage.':'The browser did not grant persistent storage. Keep backup ZIP files.');updateStorageEstimate();}catch{toast('Could not request storage persistence.');}break;
  }
@@ -1167,7 +1240,30 @@ document.addEventListener('input',e=>{
 });
 // Decoding support varies on iPad (particularly HEIC). A failed thumbnail does
 // not imply the original stored Blob has disappeared.
-document.addEventListener('error',event=>{const image=event.target;if(!(image instanceof HTMLImageElement)||!image.hasAttribute('data-warranty-photo'))return;if(image.dataset.cardPhoto){const box=image.parentElement;box.classList.replace('has-photo','no-photo');box.innerHTML=cardIcon(box.nextElementSibling?.textContent||'');return;}image.hidden=true;const note=document.createElement('span');note.className='we-photo-preview-fallback';note.textContent='Preview unavailable — original retained';image.parentElement?.append(note);},true);
+document.addEventListener('error',event=>{
+ const image=event.target;
+ if(!(image instanceof HTMLImageElement)||!image.hasAttribute('data-warranty-photo'))return;
+ // A corrupt/unsupported small preview must not hide a perfectly good
+ // full-size original. Try the local original before showing a placeholder.
+ if(image.dataset.originalAttempted!=='true'){
+   image.dataset.originalAttempted='true';
+   const id=image.dataset.warrantyFile,record=appliances.find(r=>(r.files||[]).some(f=>f.id===id));
+   const file=record?.files?.find(f=>f.id===id)||editor?.draft.files?.find(f=>f.id===id);
+   if(file?.blob instanceof Blob&&file.blob.size&&file.previewBlob instanceof Blob&&file.previewBlob.size){
+     image.src=previewUrl(file.blob,image.dataset.cardPhoto?'main':'modal');
+     return;
+   }
+ }
+ if(image.dataset.cardPhoto){
+   const box=image.parentElement;box.classList.replace('has-photo','no-photo');
+   box.innerHTML=cardIcon(box.nextElementSibling?.textContent||'');
+   return;
+ }
+ image.hidden=true;
+ const note=document.createElement('span');note.className='we-photo-preview-fallback';
+ note.textContent='Preview unavailable — original kept';
+ image.parentElement?.append(note);
+},true);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalKind){closeModal();}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&vaultKey)lockVault(true);});
 document.addEventListener('click',()=>touchVault());
@@ -1178,6 +1274,12 @@ document.addEventListener('input',()=>touchVault());
  try{
   if(!('indexedDB'in window))throw new Error('IndexedDB is unavailable');
   db=await openDB();await refresh();renderHome();
+   // Legacy snapshots do not carry JPEG thumbnails. Derive them on capable
+   // devices and publish the display-safe copy encrypted with the original.
+   for(const record of appliances){
+     const need=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&f.blob instanceof Blob&&f.blob.size&&!(f.previewBlob instanceof Blob&&f.previewBlob.size));
+     if(need.length)void prepareDisplayImages(record.id,need).catch(()=>{});
+   }
    void window.WarrantyCloud?.start?.().catch(error=>console.warn('Cloud reconnect will retry:',error?.message||error));
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js',{scope:'/WarrantyEase/'}).catch(()=>{});
  }catch(err){

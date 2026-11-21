@@ -1,6 +1,6 @@
 {
-  "version": "0.8.5",
-  "release": "appliance-card-photos",
+  "version": "0.9.0",
+  "release": "automatic-reconciliation",
   "dataPublished": false,
-  "sourceSha": "bcc6037284ae798317a2d069d1482214177383e8"
+  "sourceSha": "a209efcc2be43db0d011dbeb9297f2bb72cde05c"
 }
