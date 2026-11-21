@@ -168,8 +168,6 @@ function setNavState() {
 function renderHome() {
  currentView='home';setNavState();clearUrls('main');
  const covered=appliances.filter(isCovered).length;
- const latest=[...appliances,...websiteAccounts].map(x=>x.updatedAt||'').sort().at(-1)||'';
- const needsArchive=!!(appliances.length||websiteAccounts.length)&&!window.WarrantyCloud?.status?.().connected&&(!lastBackupAt||latest>lastBackupAt);
  root.innerHTML=`
  <section class="home-head">
   <div class="eyebrow">Your home, organised</div>
@@ -180,8 +178,6 @@ function renderHome() {
  <section class="help-strip"><span class="help-icon">${ico('shield')}</span><div><strong>Need to make a warranty claim?</strong><p>Choose an appliance below to find your serial number, receipt and contact details.</p></div>${ico('arrow','help-arrow')}</section>
  ${window.WarrantyFollowUpsUI?.home?.(appliances,{today:today(),esc,ico,fdate})||''}
  <section class="list-section"><div class="section-head"><div><h2>My appliances</h2><p>${appliances.length?'Tap any appliance for details and documents.':'Start by saving a receipt or model number.'}</p></div></div><div id="appliance-list"></div></section>
- ${appliances.length===0?quickStartMarkup():''}
- ${needsArchive?`<section class="backup-nudge"><div class="backup-nudge-icon">${ico('alert')}</div><div><strong>A fresh backup is due</strong><p>Keep a copy outside the app, in case your device is ever lost.</p></div><button class="btn btn-line btn-sm" data-action="settings">Back up ${ico('arrow')}</button></section>`:''}
  <p class="note-muted warranty-footnote">Coverage dates are estimates based on your entries. Always check the terms of your warranty.</p>`;
  if(searchTerm.trim())document.querySelector('.home-utility')?.classList.add('wallet-show-search');
  renderGrid();
@@ -251,19 +247,53 @@ async function changeFollowUpStatus(recordId,noteId,status){
 }
 
 function quickStartMarkup() {return `<aside class="quick-start"><div class="quick-header"><h3>Get started with your recent purchases</h3><span>Models only: you can add the serials and receipts when ready.</span></div><div class="quick-list">${templates.map((t,i)=>`<div class="quick-item"><div><strong>${esc(t.brand)} ${esc(t.productName)}</strong><span>${esc(t.model)}</span></div><button data-action="quick-add" data-template="${i}" aria-label="Add ${esc(t.productName)}">+</button></div>`).join('')}</div></aside>`;}
+// Trim blank catalogue margins only for the card. Original evidence stays intact.
+document.addEventListener('load',event=>{
+ const img=event.target;
+ if(img.dataset?.cardPhoto!=='catalogue'||!img.naturalWidth)return;
+ const canvas=document.createElement('canvas');
+ const scale=Math.min(1,400/Math.max(img.naturalWidth,img.naturalHeight));
+ const w=canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+ const h=canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+ const ctx=canvas.getContext('2d');
+ if(!ctx)return;
+ ctx.drawImage(img,0,0,w,h);
+ const pixels=ctx.getImageData(0,0,w,h).data;
+ let left=w,right=-1,top=h,bottom=-1;
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const i=4*(y*w+x);
+  if(pixels[i+3]<20||Math.min(pixels[i],pixels[i+1],pixels[i+2])>=248)continue;
+  left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);
+ }
+ if(right-left<4||bottom-top<4)return;
+ const pad=Math.ceil(Math.max(w,h)*0.025);
+ left=Math.max(0,left-pad);top=Math.max(0,top-pad);
+ right=Math.min(w-1,right+pad);bottom=Math.min(h-1,bottom+pad);
+ if(right-left+1===w&&bottom-top+1===h)return;
+ const cropped=ctx.getImageData(left,top,right-left+1,bottom-top+1);
+ canvas.width=cropped.width;canvas.height=cropped.height;
+ ctx.putImageData(cropped,0,0);canvas.setAttribute('aria-hidden','true');
+ img.replaceWith(canvas);
+},true);
 function renderGrid() {
  const list=document.getElementById('appliance-list');if(!list)return;
  clearUrls('main');
  const filtered=appliances.filter(r=>[r.productName,r.brand,r.model,r.serial,r.retailer,r.category,...(r.files||[]).map(f=>f.ocrText||'')].join(' ').toLowerCase().includes(searchTerm.trim().toLowerCase()));
- if(!appliances.length){list.innerHTML=`<div class="empty-state compact-empty"><div class="empty-art">${ico('box')}</div><h3>All your warranties. One place.</h3><p>Add the appliance as it is installed, then add a receipt or model reference picture.</p><button class="btn btn-dark" data-action="new">${ico('camera')} Add your first appliance</button></div>`;return;}
+ if(!appliances.length){list.innerHTML=`<div class="empty-state compact-empty"><div class="empty-art">${ico('box')}</div><h3>No appliances yet</h3><p>Add an appliance to keep its receipt and warranty together.</p></div>`;return;}
  if(!filtered.length){list.innerHTML='<div class="no-results">No appliances match your search.</div>';return;}
  list.innerHTML=`<div class="appliance-grid">${filtered.map(r=>{
   const photo=preferredPicture(r),blob=mediaBlob(photo);
-  const image=blob?`<img loading="lazy" decoding="async" data-warranty-photo="true" alt="${esc(r.productName||r.model||'Appliance')}" src="${previewUrl(blob,'main')}">`:cardIcon(r.category);
-  const exp=computedExpiry(r),label=window.WarrantyMedia?.chooseWarrantyLabel?.(r.durationMonths)||'';
-  const evidence=isReady(r)?'Evidence complete':'Evidence to add';
-  const expiry=exp?fdate(exp):'Not recorded';
-  return `<article class="appliance-card"><button class="appliance-open" data-action="view" data-id="${esc(r.id)}" aria-label="Open ${esc(r.productName||r.brand||'appliance')} warranty details"><div class="card-image">${image}${label?`<span class="we-warranty-badge" title="Period entered by you, not independently verified">${esc(label)}</span>`:''}${!blob&&missingImageNotice(r)?`<span class="we-photo-warning">Photo unavailable locally</span>`:''}</div><div class="card-copy"><span class="card-kicker">${esc(r.brand||r.category||'Appliance')}</span><h3 class="card-title">${esc(r.productName||r.model||'Appliance')}</h3><p class="card-model we-card-model">${esc(r.model||'Model not yet recorded')}</p><div class="we-expiry-line"><span>${exp?(isExpired(r)?'Warranty ended':'Warranty expires'):'Warranty expiry'}</span><strong class="${isExpired(r)?'we-expired-text':''}">${esc(expiry)}</strong></div><div class="we-evidence-status">${ico(isReady(r)?'checkcircle':'info')} ${esc(evidence)}${photo?` · ${esc(photo.type==='reference'?'Reference photo':'Installed photo')}`:''}</div></div>${ico('arrow','card-chevron')}</button></article>`;
+  const name=(r.productName||'').trim(), brand=(r.brand||'').trim(), model=(r.model||'').trim();
+  const generic=/^(washing machine|washer|fridge|fridge freezer|dishwasher|dryer|heat[- ]pump tumble dryer|tumble dryer|oven|tv|television)$/i.test(name);
+  const title=(generic&&brand?brand+' '+name:name)||brand||model||'Appliance';
+  const subtitle=model&&!title.toLowerCase().includes(model.toLowerCase())?model:'';
+  const exp=computedExpiry(r);
+  const note=window.WarrantyFollowUps?.agenda([r],{today:today()})[0];
+  const days=exp?(Date.parse(exp)-Date.parse(today()))/86400000:Infinity;
+  const status=note?note.title:exp?((r.expiryDate?(days<0?'Ended':'Expires'):'Estimated end')+' · '+fdate(exp)):'Expiry unknown';
+  const tone=note?'followup':days<0?'ended':days<=30?'soon':'normal';
+  const image=blob?`<img loading="lazy" decoding="async" data-warranty-photo="true" data-card-photo="${photo.type==='reference'?'catalogue':'installed'}" alt="" src="${previewUrl(blob,'main')}">`:cardIcon(name||r.category);
+  return `<article class="appliance-card"><button class="appliance-open" data-action="view" data-id="${esc(r.id)}"><div class="card-image ${blob?'has-photo':'no-photo'}">${image}</div><div class="card-copy"><h3 class="card-title">${esc(title)}</h3>${subtitle?`<p class="we-card-model">${esc(subtitle)}</p>`:''}<p class="card-status" data-tone="${tone}">${esc(status)}</p></div></button></article>`;
  }).join('')}</div>`;
 }
 function renderSettings() {
@@ -1137,7 +1167,7 @@ document.addEventListener('input',e=>{
 });
 // Decoding support varies on iPad (particularly HEIC). A failed thumbnail does
 // not imply the original stored Blob has disappeared.
-document.addEventListener('error',event=>{const image=event.target;if(!(image instanceof HTMLImageElement)||!image.hasAttribute('data-warranty-photo'))return;image.hidden=true;const note=document.createElement('span');note.className='we-photo-preview-fallback';note.textContent='Preview unavailable — original retained';image.parentElement?.append(note);},true);
+document.addEventListener('error',event=>{const image=event.target;if(!(image instanceof HTMLImageElement)||!image.hasAttribute('data-warranty-photo'))return;if(image.dataset.cardPhoto){const box=image.parentElement;box.classList.replace('has-photo','no-photo');box.innerHTML=cardIcon(box.nextElementSibling?.textContent||'');return;}image.hidden=true;const note=document.createElement('span');note.className='we-photo-preview-fallback';note.textContent='Preview unavailable — original retained';image.parentElement?.append(note);},true);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalKind){closeModal();}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&vaultKey)lockVault(true);});
 document.addEventListener('click',()=>touchVault());

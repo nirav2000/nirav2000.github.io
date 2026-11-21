@@ -48,14 +48,15 @@ window.WarrantyCloud=(()=>{
     return `<section class="cloud-panel"><div class="cloud-head"><span class="cloud-symbol">☁</span><div><h3>Encrypted cloud backups &amp; recovery</h3><p>Use the same account and encryption passphrase on each device.</p></div></div>${content}<p class="cloud-status" role="status">${esc(msg)}</p></section>`;
   }
   function banner(){
-    if(!localCount()&&!state.pendingRestore)return '';
-    // A normal completed sync needs no large banner on the minimal wallet home.
-    const status=state.error?'Cloud sync needs attention: '+state.error:
-      state.connected?(state.needsSync?'Changes saved locally; syncing automatically':''):
-      'Connect cloud sync once to keep your appliances on every device';
-    if(!status)return '';
-    return '<div class="we-sync-banner" role="status"><span>'+esc(status)+
-      '</span><button type="button" data-action="settings">'+(state.error?'Fix sync':'Sync settings')+'</button></div>';
+    let label='Connect sync', tone='idle';
+    if(!navigator.onLine){label='Offline';}
+    else if(state.error){label='Sync needs attention';tone='error';}
+    else if(state.busy){label='Syncing…';tone='pending';}
+    else if(state.connected){
+      label=state.needsSync?'Sync pending':'Synced';
+      tone=state.needsSync?'pending':'ok';
+    }
+    return '<button type="button" class="sync-indicator" data-tone="'+tone+'" data-action="settings" title="Cloud sync settings">'+label+'</button>';
   }
   function redraw(){const target=document.getElementById('cloud-ui');if(target)target.innerHTML=panel();const bannerNode=document.getElementById('we-cloud-banner');if(bannerNode)bannerNode.innerHTML=banner();const nudge=document.querySelector?.('.backup-nudge');if(nudge)nudge.style.display=state.connected?'none':'';}
   async function jsonResponse(response){const d=await response.json().catch(()=>({}));if(!response.ok)throw new Error(String(d?.error?.message||d?.error||d?.message||`HTTP ${response.status}`));return d;}
@@ -432,6 +433,9 @@ window.WarrantyCloud=(()=>{
     redraw();
   }
   async function start(){
+      if(!state.liveTimer&&typeof setInterval==='function'){
+        state.liveTimer=setInterval(()=>{if(!document.hidden&&state.connected&&navigator.onLine&&Date.now()-state.lastCheck>60000)syncNow().catch(()=>{})},60000);
+      }
     if(state.starting)return state.starting;
     state.starting=(async()=>{
       await loadPrevious();
@@ -457,14 +461,13 @@ window.WarrantyCloud=(()=>{
         state.error=String(error.message||'Cloud connection needs verification.');
         redraw();
       }
-      if(!state.liveTimer&&typeof setInterval==='function'){
-        state.liveTimer=setInterval(()=>{if(!document.hidden&&state.connected&&navigator.onLine&&Date.now()-state.lastCheck>60000)syncNow().catch(()=>{})},60000);
-      }
+
     })();
-    return state.starting;
+    try{return await state.starting;}finally{state.starting=null;}
   }
-  addEventListener('online',()=>{if(state.connected)syncNow().catch(()=>{});redraw()});
-  addEventListener('visibilitychange',()=>{if(!document.hidden&&state.connected&&Date.now()-state.lastCheck>30000)syncNow().catch(()=>{})});
+  addEventListener('online',()=>{if(state.connected)syncNow().catch(()=>{});else if(state.remembered)start().catch(()=>{});redraw()});
+  addEventListener('offline',redraw);
+  document.addEventListener?.('visibilitychange',()=>{if(!document.hidden&&state.connected&&Date.now()-state.lastCheck>30000)syncNow().catch(()=>{})});
 
   return{panel,banner,redraw,handle,scheduleUpload,fetchManufacturerPhoto,start,syncNow,status:()=>({connected:state.connected,method:state.method,latestBackup:state.lastCloudCopy,pendingRestore:state.pendingRestore,error:state.error,needsSync:state.needsSync,deviceCopies:state.deviceCopies,remembered:state.remembered})};
 })();

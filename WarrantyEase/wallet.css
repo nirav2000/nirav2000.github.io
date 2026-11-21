@@ -71,3 +71,35 @@
  .appliance-card .card-image{height:100px;width:92px;min-width:92px;flex-basis:92px}
  .appliance-card .card-title{font-size:15px}
 }
+
+.sync-indicator{display:inline-flex;align-items:center;gap:7px;padding:6px 0;border:0;background:transparent;color:#46544b;font:inherit;cursor:pointer}
+.sync-indicator::before{content:'';width:8px;height:8px;border-radius:50%;background:#7c847e}
+.sync-indicator[data-tone=ok]::before{background:#28744c}
+.sync-indicator[data-tone=pending]::before{background:#a76e13}
+.sync-indicator[data-tone=error]::before{background:#b64434}
+.modal,.modal-content,.field,.form-grid>*,.upload-grid>*,.card-copy{min-width:0;overflow-wrap:anywhere}
+input,select,textarea,img{max-width:100%}
+@media(pointer:coarse),(max-width:768px){
+ body input:not([type=checkbox]):not([type=radio]),body select,body textarea{font-size:16px!important}
+}
+@media(max-width:520px){
+ .form-grid,.upload-grid,.detail-grid{grid-template-columns:minmax(0,1fr)}
+ .modal-footer,.footer-left,.footer-right,.upload-buttons{flex-wrap:wrap}
+ .appliance-card .card-copy{min-width:0;overflow-wrap:anywhere}
+}
+
+.appliance-card .appliance-open{padding:6px 12px;gap:12px;min-height:106px;background:white}
+.appliance-card .card-image{margin:0;padding:0;border:0;background:white;border-radius:0;width:110px;height:104px;min-width:0;flex:0 0 110px}
+.appliance-card .card-image img,.appliance-card .card-image canvas{display:block;width:100%;height:100%;padding:0;object-fit:contain;background:white}
+.appliance-card .card-image.no-photo{flex-basis:48px;width:48px;height:48px;background:transparent}
+.appliance-card .no-photo svg{width:32px;height:32px}
+.appliance-card .card-copy{padding:6px 0}
+.appliance-card .we-card-model{margin:2px 0 0}
+.card-status{margin:7px 0 0;font-size:13px;color:#5c665f}
+.card-status[data-tone=ended]{color:#934a3b}
+.card-status[data-tone=soon],.card-status[data-tone=followup]{color:#785522}
+@media(max-width:700px){
+ .home-title-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+ .home-add{position:static;min-height:44px;padding:0 14px}
+ .appliance-card .card-image.has-photo{width:clamp(92px,29vw,130px);flex-basis:clamp(92px,29vw,130px);height:112px}
+}
