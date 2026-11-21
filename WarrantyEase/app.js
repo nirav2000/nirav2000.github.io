@@ -794,15 +794,30 @@ async function createRawBackupZip(){
  return buildZip(items);
 }
 async function encryptBackupBytes(bytes,passphrase){
- const salt=randomBytes(16),iv=randomBytes(12),key=await deriveVaultKey(passphrase,salt);
- const encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,bytes));
- return new Blob([encoder.encode(BACKUP_MAGIC),salt,iv,encrypted],{type:'application/octet-stream'});
+  // Failure to encrypt must leave all existing data intact.
+  try{
+    const salt=randomBytes(16),iv=randomBytes(12),key=await deriveVaultKey(passphrase,salt);
+    const encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,bytes));
+    return new Blob([encoder.encode(BACKUP_MAGIC),salt,iv,encrypted],{type:'application/octet-stream'});
+  }catch(error){
+    if(error?.name!=='OperationError')throw error;
+    const blocked=new Error('This device could not encrypt the latest changes. Your original files remain locally saved; nothing was overwritten in Cloudflare.');
+    blocked.code='WE_DEVICE_ENCRYPT';throw blocked;
+  }
 }
 async function decryptBackupBlob(blob,passphrase){
- const bytes=new Uint8Array(await blob.arrayBuffer());
- if(bytes.length<64||decoder.decode(bytes.slice(0,8))!==BACKUP_MAGIC)throw new Error('Invalid encrypted backup');
- const key=await deriveVaultKey(passphrase,bytes.slice(8,24));
- return new Blob([await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes.slice(24,36)},key,bytes.slice(36))],{type:'application/zip'});
+  const bytes=new Uint8Array(await blob.arrayBuffer());
+  if(bytes.length<64||decoder.decode(bytes.slice(0,8))!==BACKUP_MAGIC)throw new Error('Invalid encrypted cloud copy. Your other files and cloud history remain intact.');
+  try{
+    const key=await deriveVaultKey(passphrase,bytes.slice(8,24));
+    return new Blob([await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes.slice(24,36)},key,bytes.slice(36))],{type:'application/zip'});
+  }catch(error){
+    // OperationError covers an AES-GCM authentication failure, which may be
+    // caused by a different passphrase or corrupted bytes. No silent reset.
+    if(error?.name!=='OperationError')throw error;
+    const locked=new Error('This encrypted cloud copy could not be unlocked. Check the original cloud passphrase; the copy might also be damaged. No local or cloud files were deleted.');
+    locked.code='WE_ARCHIVE_UNLOCK';throw locked;
+  }
 }
 async function backupAll(){
  try{

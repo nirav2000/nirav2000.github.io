@@ -14,7 +14,7 @@ window.WarrantyCloud=(()=>{
     lastCloudCopy:'',lastBackupId:'',knownLatestId:'',busy:false,backups:[],error:'',connected:false,
     pendingRestore:false,remoteChanged:false,autoTimer:0,lastCheck:0,needsSync:false,uploading:false,cloudOriginals:0,
     syncPromise:null,starting:null,retryTimer:0,retryDelay:5000,checkpointTimer:0,deviceCopies:0,lastDeviceCopy:'',
-    syncRevision:0,uploadedRevision:0,resyncWanted:false,remembered:false,liveTimer:0,deviceEntries:[],cachedCloudId:'',verified:false,repairing:false,initialReconciled:false};
+    syncRevision:0,uploadedRevision:0,resyncWanted:false,remembered:false,liveTimer:0,deviceEntries:[],cachedCloudId:'',verified:false,repairing:false,initialReconciled:false,unlockNeeded:false,lockedArchiveIds:new Set()};
   const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt=x=>x?new Date(x).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'Not yet';
   const size=x=>x<1e6?`${Math.round(x/1024)} KB`:`${(x/1048576).toFixed(1)} MB`;
@@ -27,6 +27,7 @@ window.WarrantyCloud=(()=>{
     if(state.busy||state.repairing)return {label:'Syncing…',tone:'pending',detail:missing?'Repairing missing originals.':'Reconciling encrypted cloud and local records.'};
     if(state.error)return {label:'Sync needs attention',tone:'error',detail:state.error};
     if(!state.connected)return {label:'Connect sync',tone:'idle',detail:'Connect once to automatically protect and synchronise your appliances, pictures and receipts.'};
+    if(state.lockedArchiveIds.size)return {label:'Sync needs attention',tone:'error',detail:'Current cloud data can sync, but older encrypted history could not be unlocked with this passphrase. All historical copies remain preserved.'};
     if(state.busy||state.repairing||state.needsSync||missing||!state.verified||state.cachedCloudId!==state.lastBackupId){
       return {label:missing?'Repairing photos…':'Syncing…',tone:'pending',detail:missing?'Checking encrypted cloud history for '+missing+' missing original file(s).':'Checking that every local file and the newest encrypted cloud copy are in sync.'};
     }
@@ -44,6 +45,12 @@ window.WarrantyCloud=(()=>{
       </details>
       <p class="cloud-hint">One-time connection. Future visits use the remembered encrypted session when it is still valid.</p>
     </div>`:`<p class="cloud-hint">Connected as ${esc(state.email||'your existing account')}. Sync runs automatically whenever this app is open and online.</p>
+      ${state.unlockNeeded?`<div class="cloud-form">
+        <label for="cloud-passphrase">Re-enter the existing cloud encryption passphrase</label>
+        <input id="cloud-passphrase" class="input" type="password" autocomplete="off" placeholder="Original encryption passphrase">
+        <button class="btn btn-dark" data-action="cloud-unlock">Unlock existing cloud data</button>
+        <p class="cloud-hint">Your photos and encrypted cloud history have not been cleared. Do not choose a new passphrase.</p>
+      </div>`:''}
       <details class="cloud-fallback"><summary>Connection settings</summary><button type="button" class="btn btn-ghost btn-sm" data-action="cloud-logout">Disconnect this device</button></details>`;
     return `<section class="cloud-panel"><div class="cloud-head"><span class="cloud-symbol">☁</span><div><h3>Cloud sync</h3><p class="cloud-status" role="status"><strong>${esc(status.label)}</strong> · ${esc(status.detail)}</p></div></div>${form}</section>`;
   }
@@ -100,8 +107,16 @@ window.WarrantyCloud=(()=>{
     const saved=await storeAction(META_STORE,'readonly',tx=>tx.get('cloudSession'));
     if(!saved)return null;
     if(saved.version!==1||!Array.isArray(saved.iv)||!Array.isArray(saved.ciphertext))throw Error('Remembered cloud session is invalid.');
-    const key=await deviceKey(),bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(saved.iv),
-      additionalData:new TextEncoder().encode('WarrantyEase:cloudSession:v1')},key,new Uint8Array(saved.ciphertext));
+    let bytes;
+    try{
+      const key=await deviceKey();
+      bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(saved.iv),
+        additionalData:new TextEncoder().encode('WarrantyEase:cloudSession:v1')},key,new Uint8Array(saved.ciphertext));
+    }catch(error){
+      if(error?.name!=='OperationError')throw error;
+      const expired=new Error('This device cannot unlock its remembered sync session. Reconnect with your existing passkey and original cloud passphrase. Your local photos and cloud history remain untouched.');
+      expired.code='WE_DEVICE_SESSION_LOCKED';throw expired;
+    }
     const entry=JSON.parse(new TextDecoder().decode(bytes));
     if(!['firebase','passkey'].includes(entry.method)||String(entry.passphrase||'').length<12)throw Error('Remembered cloud credentials are incomplete.');
     return entry;
@@ -141,7 +156,14 @@ window.WarrantyCloud=(()=>{
       if(session?.method!=='passkey')throw Error('A verified administrator passkey session is required.');
       state.passkeyClient=client;state.method='passkey';state.uid=OWNER_UID;state.email='App Monitor passkey';state.connected=true;state.passphrase=pass;
       await beforeCloudUse();
-    }catch(error){state.connected=false;state.error=error.message||'Cloud login unavailable.';throw error;}finally{state.busy=false;redraw();}
+    }catch(error){
+      // Authentication already succeeded if the subsequent encrypted sync
+      // fails. Preserve that verified session so the original passphrase can
+      // be re-entered without invoking passkey login all over again.
+      if(state.connected&&error?.code==='WE_ARCHIVE_UNLOCK')state.unlockNeeded=true;
+      state.error=error.message||'Cloud connection unavailable.';
+      throw error;
+    }finally{state.busy=false;redraw();}
   }
   async function firebaseLogin(){
     const email=document.getElementById('cloud-email')?.value.trim()||'',pw=document.getElementById('cloud-password')?.value||'',pass=document.getElementById('cloud-passphrase')?.value||state.passphrase;
@@ -153,7 +175,14 @@ window.WarrantyCloud=(()=>{
       const r=await jsonResponse(response);if(r.localId!==OWNER_UID)throw Error('This Firebase account is not the warranty owner.');
       Object.assign(state,{uid:r.localId,token:r.idToken,refresh:r.refreshToken,expires:Date.now()+Number(r.expiresIn||3600)*1000,email,passphrase:pass,connected:true,method:'firebase'});
       localStorage.setItem('we-cloud-email',email);await beforeCloudUse();
-    }catch(error){state.connected=false;state.error=error.message||'Cloud login unavailable.';throw error;}finally{state.busy=false;redraw();}
+    }catch(error){
+      // Authentication already succeeded if the subsequent encrypted sync
+      // fails. Preserve that verified session so the original passphrase can
+      // be re-entered without invoking passkey login all over again.
+      if(state.connected&&error?.code==='WE_ARCHIVE_UNLOCK')state.unlockNeeded=true;
+      state.error=error.message||'Cloud connection unavailable.';
+      throw error;
+    }finally{state.busy=false;redraw();}
   }
   function disconnect({quiet=false,forget=true}={}){
     if(state.autoTimer)clearTimeout(state.autoTimer);
@@ -166,7 +195,14 @@ window.WarrantyCloud=(()=>{
     if(forget)void forgetRemembered().catch(()=>{});
     if(!quiet)redraw();
   }
-  async function unlock(){const pass=document.getElementById('cloud-passphrase')?.value||state.passphrase;if(pass.length<12)throw Error('Enter your original cloud encryption passphrase.');state.passphrase=pass;state.error='';await syncNow({force:true});await rememberConnection();redraw();}
+  async function unlock(){
+    const pass=document.getElementById('cloud-passphrase')?.value||'';
+    if(pass.length<12)throw Error('Enter your original cloud encryption passphrase (12+ characters).');
+    state.passphrase=pass;state.error='';state.unlockNeeded=false;
+    try{await syncNow();await rememberConnection();}
+    catch(error){if(error?.code==='WE_ARCHIVE_UNLOCK')state.unlockNeeded=true;throw error;}
+    finally{redraw();}
+  }
   async function writeIndex(id,sha,bytes){
     if(state.method!=='firebase')return; // Existing Firestore owner rules require Firebase ID token.
     const url=`${FIRESTORE}/warrantyEase/${encodeURIComponent(state.uid)}/snapshots/${encodeURIComponent(id)}`;
@@ -212,10 +248,15 @@ window.WarrantyCloud=(()=>{
     const sha=await window.WarrantyCloudChunks.digest(bytes);
     const matching=state.backups.find(x=>x.id===id);
     if(matching?.sha256&&matching.sha256!==sha)throw Error('Cloud copy integrity check failed.');
-    await storeAction(DEVICE_BACKUPS_STORE,'readwrite',st=>st.put({
-      id:'cloud-current',archiveId:id,at:created||matching?.created||new Date().toISOString(),
-      sha,blob:encrypted,bytes:bytes.byteLength
-    }));
+    try{
+      await storeAction(DEVICE_BACKUPS_STORE,'readwrite',st=>st.put({
+        id:'cloud-current',archiveId:id,at:created||matching?.created||new Date().toISOString(),
+        sha,blob:encrypted,bytes:bytes.byteLength
+      }));
+    }catch(error){
+      const storage=new Error('This device could not keep the latest encrypted cloud copy locally. Check its browser storage; the cloud copy and your original files remain untouched.');
+      storage.code='WE_CLOUD_LOCAL_STORAGE';throw storage;
+    }
     state.cachedCloudId=id;
   }
   async function repairLocalOriginals(){
@@ -301,9 +342,14 @@ window.WarrantyCloud=(()=>{
   }
   function planRetry(){
     if(state.retryTimer)clearTimeout(state.retryTimer);
-    if(!state.connected||!state.passphrase||!navigator.onLine)return;
+    if(!state.connected||!state.passphrase||!navigator.onLine||state.unlockNeeded)return;
     const wait=state.retryDelay;state.retryDelay=Math.min(wait*2,300000);
     state.retryTimer=setTimeout(()=>{state.retryTimer=0;syncNow().catch(()=>{})},wait);
+  }
+  async function rememberLockedHistory(){
+    await storeAction(META_STORE,'readwrite',st=>st.put({
+      id:'cloudLockedHistory',ids:[...state.lockedArchiveIds].slice(0,100)
+    }));
   }
   async function syncNow({force=false}={}){
     if(state.syncPromise){if(state.needsSync)state.resyncWanted=true;return state.syncPromise;}
@@ -313,86 +359,102 @@ window.WarrantyCloud=(()=>{
     state.syncPromise=(async()=>{
       state.busy=true;state.verified=false;state.error='';redraw();
       try{
-        // Repair bytes from local encrypted cloud/history even if the R2 list
-        // still points to the same archive as the last successful sync.
+        // Repair missing bytes from the latest verified local encrypted copy.
         if(missingOriginals().length)await repairLocalOriginals();
         await list({quiet:true});
         const remoteLatest=latest();
-        if(!remoteLatest&&state.lastBackupId)throw Error('Cloud archive listing is unavailable; local originals remain intact.');
+        if(!remoteLatest&&state.lastBackupId)throw Error('Cloud copy listing is unavailable. Local originals remain intact.');
         const previousIndex=state.backups.findIndex(x=>x.id===state.lastBackupId);
-        // Existing cloud snapshots are full archives. On a new device, merge
-        // several recent heads to preserve possible concurrent offline branches.
+        const processed=new Set();
         const pending=remoteLatest?(previousIndex>=0
           ?state.backups.slice(0,previousIndex).reverse()
           :state.backups.slice(0,Math.min(8,state.backups.length)).reverse()):[];
-        const processed=new Set();let latestZip=null;
+        let latestZip=null,latestEncrypted=null,historyChanged=false;
+        const shouldReadLatest=!!remoteLatest&&(!state.initialReconciled||state.cachedCloudId!==remoteLatest.id||
+          state.lastBackupId!==remoteLatest.id||!!missingOriginals().length||state.needsSync||force);
+        // CRITICAL: verify the newest cloud copy under the current passphrase
+        // before making ANY changes to local records. An old archive may use a
+        // different historic key and must never prevent validating the head.
+        if(shouldReadLatest){
+          latestEncrypted=await getEncrypted(remoteLatest.id);
+          latestZip=await decryptBackupBlob(latestEncrypted,state.passphrase);
+        }
+        async function mergeOlder(remote){
+          try{
+            const encrypted=await getEncrypted(remote.id);
+            const zip=await decryptBackupBlob(encrypted,state.passphrase);
+            if(await applyRestoredZip(zip,{automatic:true})!==true)throw Error('Historical cloud reconciliation was interrupted.');
+            processed.add(remote.id);
+            if(state.lockedArchiveIds.delete(remote.id))historyChanged=true;
+          }catch(error){
+            if(error?.code!=='WE_ARCHIVE_UNLOCK')throw error;
+            // Older versions remain immutable in Cloudflare. Do not delete or
+            // rewrite them, or block the latest healthy cloud state.
+            if(!state.lockedArchiveIds.has(remote.id)){state.lockedArchiveIds.add(remote.id);historyChanged=true;}
+          }
+        }
         for(const remote of pending){
           if(editing()){state.resyncWanted=true;return;}
-          const encrypted=await getEncrypted(remote.id);
-          const zip=await decryptBackupBlob(encrypted,state.passphrase);
-          if(await applyRestoredZip(zip,{automatic:true})!==true)throw Error('Encrypted cloud merge did not complete.');
-          processed.add(remote.id);
-          if(remote.id===remoteLatest?.id){latestZip=zip;await cacheLatestCloud(remote.id,encrypted,remote.created);}
+          if(remote.id===remoteLatest?.id)continue;
+          await mergeOlder(remote);
         }
-        // Missing originals must not be treated as synchronized. Search older
-        // immutable snapshots until restored or history is exhausted.
+        if(latestZip){
+          if(await applyRestoredZip(latestZip,{automatic:true})!==true)throw Error('Latest cloud reconciliation was interrupted.');
+          processed.add(remoteLatest.id);
+          await cacheLatestCloud(remoteLatest.id,latestEncrypted,remoteLatest.created);
+          if(state.lockedArchiveIds.delete(remoteLatest.id))historyChanged=true;
+        }
+        // Recover missing originals from other immutable versions. A locked
+        // historic archive is noted, not silently erased or treated as empty.
         if(missingOriginals().length){
           state.repairing=true;redraw();
           try{
             for(const remote of state.backups){
               if(!missingOriginals().length)break;
               if(processed.has(remote.id))continue;
-              const encrypted=await getEncrypted(remote.id);
-              const zip=await decryptBackupBlob(encrypted,state.passphrase);
-              if(await applyRestoredZip(zip,{automatic:true})!==true)throw Error('Cloud evidence recovery was interrupted.');
-              processed.add(remote.id);
-              if(remote.id===remoteLatest?.id){latestZip=zip;await cacheLatestCloud(remote.id,encrypted,remote.created);}
+              await mergeOlder(remote);
             }
           }finally{state.repairing=false;redraw();}
         }
-        const missing=missingOriginals().length;
-        if(missing)throw Error(missing+' original file(s) are missing from this device and available cloud history. Keep other devices intact and reconnect the device holding those files.');
-        // Always retain the latest verified encrypted cloud copy locally, even
-        // if the user has not modified a record since the previous launch.
-        if(remoteLatest&&(state.cachedCloudId!==remoteLatest.id||!state.initialReconciled||!localCount()&&!processed.has(remoteLatest.id))){
-          const encrypted=await getEncrypted(remoteLatest.id);
-          if(!processed.has(remoteLatest.id)){
-            const zip=await decryptBackupBlob(encrypted,state.passphrase);
-            if(await applyRestoredZip(zip,{automatic:true})!==true)throw Error('Cloud records could not be recovered.');
-            latestZip=zip;
-          }
-          await cacheLatestCloud(remoteLatest.id,encrypted,remoteLatest.created);
-        }
+        if(historyChanged)await rememberLockedHistory();
+        if(missingOriginals().length)throw Error(
+          missingOriginals().length+' original photo/file(s) remain unavailable. Keep the device holding the originals and its data intact; the cloud and local copies are preserved.');
+        // On subsequent checks the verified local encrypted copy remains the
+        // canonical cached head. Download only when the cloud head changes.
         if(remoteLatest){
+          if(!latestZip&&state.cachedCloudId!==remoteLatest.id)throw Error('Latest cloud copy could not be cached safely.');
           state.lastBackupId=remoteLatest.id;
           state.lastCloudCopy=remoteLatest.created||state.lastCloudCopy;
           state.knownLatestId=remoteLatest.id;
           await saveCloudMarker();
         }
-        if(remoteLatest&&latestZip){
-          if(typeof cloudManifestNeedsUpload!=='function')throw Error('Cloud reconciliation audit is not ready. Reload this app.');
-          if(await cloudManifestNeedsUpload(latestZip)&&!state.needsSync){
-            state.syncRevision=Math.max(state.syncRevision,state.uploadedRevision)+1;
-            state.needsSync=true;
-            await persistQueue();
-          }
+        if(remoteLatest&&latestZip&&await cloudManifestNeedsUpload(latestZip)&&!state.needsSync){
+          state.syncRevision=Math.max(state.syncRevision,state.uploadedRevision)+1;
+          state.needsSync=true;
+          await persistQueue();
         }
         if(state.needsSync||force&&!remoteLatest&&localCount())await uploadCurrent();
         state.initialReconciled=true;
-        if(missingOriginals().length)throw Error('Local originals changed during sync; retrying repair.');
-        if(state.lastBackupId&&state.cachedCloudId!==state.lastBackupId)throw Error('Latest cloud copy is not yet safely cached on this device.');
-        state.error='';state.pendingRestore=false;state.retryDelay=5000;state.verified=true;
+        if(missingOriginals().length)throw Error('Local originals changed during sync. Cloud repair will retry.');
+        if(state.lastBackupId&&state.cachedCloudId!==state.lastBackupId)throw Error('Latest encrypted cloud copy is not safely cached on this device.');
+        state.error='';state.pendingRestore=false;state.retryDelay=5000;state.unlockNeeded=false;state.verified=true;
       }catch(error){
         state.verified=false;
-        state.error=String(error.message||'Automatic synchronisation failed.');
+        state.unlockNeeded=error?.code==='WE_ARCHIVE_UNLOCK';
+        state.error=error?.name==='OperationError'
+          ?'A browser encryption operation failed. Your local originals and encrypted cloud copies were kept; reopen the app and try again.'
+          :String(error?.message||'Automatic synchronisation failed.');
         state.pendingRestore=!!latest()&&state.lastBackupId!==latest()?.id;
-        planRetry();throw error;
+        if(!state.unlockNeeded)planRetry();
+        throw error;
       }finally{state.busy=false;redraw();}
     })().finally(()=>{
       state.syncPromise=null;
       if(state.resyncWanted){
         state.resyncWanted=false;
-        if(!editing()&&state.connected&&navigator.onLine)setTimeout(()=>syncNow().catch(()=>{}),2500);
+        if(!editing()&&state.connected&&navigator.onLine&&!state.unlockNeeded){
+          setTimeout(()=>syncNow().catch(()=>{}),2500);
+        }
       }
     });
     return state.syncPromise;
@@ -487,6 +549,8 @@ window.WarrantyCloud=(()=>{
     const sorted=(copies||[]).sort((a,b)=>String(b.at).localeCompare(String(a.at)));
     state.deviceCopies=sorted.filter(x=>x.id.startsWith('device-')).length;state.lastDeviceCopy=sorted.filter(x=>x.id.startsWith('device-'))[0]?.at||'';
     state.deviceEntries=sorted.filter(x=>x.id!=='cloud-current').map(x=>({id:x.id,at:x.at,bytes:x.bytes}));
+    const locked=await storeAction(META_STORE,'readonly',st=>st.get('cloudLockedHistory')).catch(()=>null);
+    state.lockedArchiveIds=new Set((locked?.ids||[]).filter(x=>/^[A-Za-z0-9_-]{5,80}$/.test(x)).slice(0,100));
     state.cachedCloudId=sorted.find(x=>x.id==='cloud-current')?.archiveId||'';
     state.verified=false;
     // Upgrade from the old snapshot client: detect edits which were not queued
@@ -535,5 +599,5 @@ window.WarrantyCloud=(()=>{
   addEventListener('offline',redraw);
   document.addEventListener?.('visibilitychange',()=>{if(!document.hidden&&state.connected&&Date.now()-state.lastCheck>30000)syncNow().catch(()=>{})});
 
-  return{panel,banner,redraw,handle,scheduleUpload,fetchManufacturerPhoto,start,syncNow,status:()=>({connected:state.connected,method:state.method,latestBackup:state.lastCloudCopy,pendingRestore:state.pendingRestore,error:state.error,needsSync:state.needsSync,deviceCopies:state.deviceCopies,remembered:state.remembered})};
+  return{panel,banner,redraw,handle,scheduleUpload,fetchManufacturerPhoto,start,syncNow,status:()=>({connected:state.connected,method:state.method,latestBackup:state.lastCloudCopy,pendingRestore:state.pendingRestore,error:state.error,needsSync:state.needsSync,deviceCopies:state.deviceCopies,remembered:state.remembered,unlockNeeded:state.unlockNeeded,lockedHistory:state.lockedArchiveIds.size})};
 })();
