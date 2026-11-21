@@ -1,6 +1,6 @@
 {
-  "version": "0.9.1",
-  "release": "safe-encrypted-reconciliation",
+  "version": "0.9.2",
+  "release": "ios-evidence-recovery",
   "dataPublished": false,
-  "sourceSha": "53f091baed83312a49de509ccaef945e1f70b735"
+  "sourceSha": "167fe9b8cd47eb0c2ec84bcc12dab7ba424c7af6"
 }

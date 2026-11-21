@@ -14,13 +14,43 @@ window.WarrantyCloud=(()=>{
     lastCloudCopy:'',lastBackupId:'',knownLatestId:'',busy:false,backups:[],error:'',connected:false,
     pendingRestore:false,remoteChanged:false,autoTimer:0,lastCheck:0,needsSync:false,uploading:false,cloudOriginals:0,
     syncPromise:null,starting:null,retryTimer:0,retryDelay:5000,checkpointTimer:0,deviceCopies:0,lastDeviceCopy:'',
-    syncRevision:0,uploadedRevision:0,resyncWanted:false,remembered:false,liveTimer:0,deviceEntries:[],cachedCloudId:'',verified:false,repairing:false,initialReconciled:false,unlockNeeded:false,lockedArchiveIds:new Set()};
+    syncRevision:0,uploadedRevision:0,resyncWanted:false,remembered:false,liveTimer:0,deviceEntries:[],cachedCloudId:'',verified:false,repairing:false,initialReconciled:false,unlockNeeded:false,lockedArchiveIds:new Set(),unreadableOriginalIds:new Set()};
   const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt=x=>x?new Date(x).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'Not yet';
   const size=x=>x<1e6?`${Math.round(x/1024)} KB`:`${(x/1048576).toFixed(1)} MB`;
   const localCount=()=>{try{return (appliances?.length||0)+(websiteAccounts?.length||0)}catch{return 0}};
   const latest=()=>state.backups[0];
-  const missingOriginals=()=>{try{return appliances.flatMap(r=>(r.files||[]).filter(f=>!(f.blob instanceof Blob)||f.blob.size===0).map(f=>({record:r.id,file:f.id})));}catch{return []}};
+  const evidenceKey=(record,file)=>String(record.id)+'/'+String(file.id);
+  // IndexedDB may still report a Blob and its size after the backing iOS
+  // storage object has disappeared. Non-zero length alone is not proof of
+  // readable bytes. Only in-memory diagnostics are kept; nothing is erased.
+  const missingOriginals=()=>{
+    try{return appliances.flatMap(r=>(r.files||[])
+      .filter(f=>!(f.blob instanceof Blob)||f.blob.size===0||
+        state.unreadableOriginalIds.has(evidenceKey(r,f)))
+      .map(f=>({record:r.id,file:f.id})));
+    }catch{return [];}
+  };
+  async function inspectLocalOriginals(){
+    const unreadable=new Set();
+    for(const record of appliances){
+      for(const file of record.files||[]){
+        const blob=file.blob;
+        if(!(blob instanceof Blob)||blob.size===0)continue;
+        try{
+          // A tiny slice avoids loading an entire receipt/photo into memory
+          // merely to verify the IndexedDB-backed file still exists.
+          await blob.slice(0,Math.min(blob.size,64)).arrayBuffer();
+        }catch(error){
+          if(['NotFoundError','NotReadableError'].includes(error?.name)){
+            unreadable.add(evidenceKey(record,file));
+          }else throw error;
+        }
+      }
+    }
+    state.unreadableOriginalIds=unreadable;
+    return missingOriginals();
+  }
   function indication(){
     const missing=missingOriginals().length;
     if(!navigator.onLine)return {label:'Offline',tone:'pending',detail:'Your local records remain available. Changes will reconcile when online.'};
@@ -275,6 +305,7 @@ window.WarrantyCloud=(()=>{
           if(actual!==copy.sha)continue;
           const zip=await decryptBackupBlob(copy.blob,state.passphrase);
           await applyRestoredZip(zip,{automatic:true});
+          await inspectLocalOriginals();
           missing=missingOriginals().length;
         }catch(error){console.warn('Previous encrypted device copy could not repair originals:',error?.name||'invalid');}
       }
@@ -306,7 +337,19 @@ window.WarrantyCloud=(()=>{
       const earlier=latest()?.id||'';
       await list({quiet:true});
       if((latest()?.id||'')!==earlier)throw Error('A new cloud copy arrived during sync; retrying a safe merge.');
-      const raw=await createRawBackupZip();
+      if((await inspectLocalOriginals()).length){
+        const error=new Error('Some original photo or receipt bytes cannot be read from this device. Automatic cloud recovery is needed before a new encrypted copy can be uploaded; all existing copies remain intact.');
+        error.code='WE_LOCAL_EVIDENCE_UNREADABLE';throw error;
+      }
+      let raw;
+      try{raw=await createRawBackupZip();}
+      catch(error){
+        if(['NotFoundError','NotReadableError'].includes(error?.name)){
+          const unavailable=new Error('An original photo or receipt became unreadable while preparing sync. No incomplete archive was uploaded. Cloud recovery will retry.');
+          unavailable.code='WE_LOCAL_EVIDENCE_UNREADABLE';throw unavailable;
+        }
+        throw error;
+      }
       const encrypted=await encryptBackupBytes(new Uint8Array(await raw.arrayBuffer()),state.passphrase);
       const bytes=await encrypted.arrayBuffer();
       const transfer=window.WarrantyCloudChunks;
@@ -359,7 +402,9 @@ window.WarrantyCloud=(()=>{
     state.syncPromise=(async()=>{
       state.busy=true;state.verified=false;state.error='';redraw();
       try{
-        // Repair missing bytes from the latest verified local encrypted copy.
+        // Identify orphaned iOS IndexedDB blobs BEFORE comparing or exporting
+        // them. A nonzero Blob.size can hide a missing backing object.
+        await inspectLocalOriginals();
         if(missingOriginals().length)await repairLocalOriginals();
         await list({quiet:true});
         const remoteLatest=latest();
@@ -384,6 +429,7 @@ window.WarrantyCloud=(()=>{
             const encrypted=await getEncrypted(remote.id);
             const zip=await decryptBackupBlob(encrypted,state.passphrase);
             if(await applyRestoredZip(zip,{automatic:true})!==true)throw Error('Historical cloud reconciliation was interrupted.');
+            await inspectLocalOriginals();
             processed.add(remote.id);
             if(state.lockedArchiveIds.delete(remote.id))historyChanged=true;
           }catch(error){
@@ -400,6 +446,7 @@ window.WarrantyCloud=(()=>{
         }
         if(latestZip){
           if(await applyRestoredZip(latestZip,{automatic:true})!==true)throw Error('Latest cloud reconciliation was interrupted.');
+          await inspectLocalOriginals();
           processed.add(remoteLatest.id);
           await cacheLatestCloud(remoteLatest.id,latestEncrypted,remoteLatest.created);
           if(state.lockedArchiveIds.delete(remoteLatest.id))historyChanged=true;
@@ -434,6 +481,7 @@ window.WarrantyCloud=(()=>{
           await persistQueue();
         }
         if(state.needsSync||force&&!remoteLatest&&localCount())await uploadCurrent();
+        await inspectLocalOriginals();
         state.initialReconciled=true;
         if(missingOriginals().length)throw Error('Local originals changed during sync. Cloud repair will retry.');
         if(state.lastBackupId&&state.cachedCloudId!==state.lastBackupId)throw Error('Latest encrypted cloud copy is not safely cached on this device.');
@@ -443,6 +491,8 @@ window.WarrantyCloud=(()=>{
         state.unlockNeeded=error?.code==='WE_ARCHIVE_UNLOCK';
         state.error=error?.name==='OperationError'
           ?'A browser encryption operation failed. Your local originals and encrypted cloud copies were kept; reopen the app and try again.'
+          :['NotFoundError','NotReadableError'].includes(error?.name)
+          ?'This device could not read a saved file. Automatic recovery will retry from encrypted cloud history; keep the device with the original photographs intact.'
           :String(error?.message||'Automatic synchronisation failed.');
         state.pendingRestore=!!latest()&&state.lastBackupId!==latest()?.id;
         if(!state.unlockNeeded)planRetry();

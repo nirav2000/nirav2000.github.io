@@ -117,7 +117,17 @@ function safeHttp(value) {if(!value)return '';try{const u=new URL(/^https?:\/\//
 function safeEmail(value) {return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value||'')?value:'';}
 
 function openDB() {return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,3);request.onupgradeneeded=()=>{const database=request.result;for(const store of [DB_STORE,ACCOUNTS_STORE,META_STORE,DEVICE_BACKUPS_STORE])if(!database.objectStoreNames.contains(store))database.createObjectStore(store,{keyPath:'id'});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);request.onblocked=()=>reject(new Error('Storage upgrade is blocked by another tab'));});}
-function storeAction(storeName,mode,callback) {return new Promise((resolve,reject)=>{const tx=db.transaction(storeName,mode);const store=tx.objectStore(storeName);let request;try{request=callback(store);}catch(e){reject(e);return;}tx.oncomplete=()=>resolve(request?.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Storage was interrupted'));});}
+function storeAction(storeName,mode,callback) {return new Promise((resolve,reject)=>{
+ if(!db?.objectStoreNames?.contains(storeName)){
+  // A missing IndexedDB object store is a schema problem, not a lost R2
+  // archive or a wrong encryption passphrase. Never reset the database here.
+  reject(new Error('This device is missing a required local storage section. Its existing records have not been cleared. Close other Warranty Ease tabs and reopen the app.'));return;
+ }
+ const tx=db.transaction(storeName,mode),store=tx.objectStore(storeName);
+ let request;try{request=callback(store);}catch(e){reject(e);return;}
+ tx.oncomplete=()=>resolve(request?.result);tx.onerror=()=>reject(tx.error);
+ tx.onabort=()=>reject(tx.error||new Error('Local storage operation was interrupted'));
+ });}
 function dbAction(mode,callback){return storeAction(DB_STORE,mode,callback);}
 // Read, merge, and write within ONE IndexedDB transaction to prevent OCR and
 // thumbnail generation from overwriting each other's changes.
@@ -876,8 +886,8 @@ async function restoreEncryptedBackup(){
 }
 async function mergeRestoredRecord(incoming,local){
   if(!local)return incoming;
-  // Record timestamps choose the primary values; older, nonempty fields survive.
-  // File IDs are immutable: never let a stale cloud version discard local bytes.
+  // Both devices retain their metadata and independent evidence. Prefer the
+  // latest nonempty values without discarding valid local-only originals.
   const newerLocal=(Date.parse(local.updatedAt||'')||0)>=(Date.parse(incoming.updatedAt||'')||0);
   const main=newerLocal?local:incoming,other=newerLocal?incoming:local,merged={...main};
   for(const [field,value] of Object.entries(other)){
@@ -885,28 +895,54 @@ async function mergeRestoredRecord(incoming,local){
     if((merged[field]===null||merged[field]===undefined||merged[field]==='')&&value!==null&&value!==undefined&&value!=='')merged[field]=value;
   }
   const files=new Map((main.files||[]).map(f=>[f.id,f]));
-  const good=f=>f?.blob instanceof Blob&&f.blob.size>0;
+  const present=f=>f?.blob instanceof Blob&&f.blob.size>0;
   const checksum=async blob=>{
-    const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()));
-    return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+    if(!(blob instanceof Blob)||!blob.size)return null;
+    try{
+      const buffer=await blob.arrayBuffer();
+      const digest=await crypto.subtle.digest('SHA-256',buffer);
+      return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+    }catch(error){
+      // iOS WebKit can retain an IndexedDB Blob with a nonzero length even
+      // after its backing file becomes unreadable. A newer, verified cloud
+      // original is preferred; no archive or conflicting version is deleted.
+      if(['NotFoundError','NotReadableError'].includes(error?.name))return null;
+      throw error;
+    }
   };
   for(const file of other.files||[]){
     const previous=files.get(file.id);
     if(!previous){files.set(file.id,file);continue;}
-    if(!good(previous)&&good(file)){files.set(file.id,{...previous,...file});continue;}
-    if(!good(file)||!good(previous)){
+    if(!present(previous)&&present(file)){files.set(file.id,{...previous,...file});continue;}
+    if(!present(file)||!present(previous)){
       files.set(file.id,{...file,...previous,previewBlob:previous.previewBlob||file.previewBlob});
       continue;
     }
-    let same=previous.blob===file.blob;
-    // A matching file ID or size is not proof of identical evidence: compare
-    // content bytes before deciding which original can safely be discarded.
-    if(!same&&previous.blob.size===file.blob.size)same=await checksum(previous.blob)===await checksum(file.blob);
-    if(!same){
-      // Different physical evidence under one ID: retain both, with a stable
-      // alternate ID so reconciling old archives cannot multiply duplicates.
-      const altId=file.id+'-variant-'+(await checksum(file.blob)).slice(0,12);
-      if(!files.has(altId)||!good(files.get(altId))){
+    if(previous.blob===file.blob){
+      files.set(file.id,{...file,...previous,previewBlob:previous.previewBlob||file.previewBlob});
+      continue;
+    }
+    // Hashing also verifies the bytes can actually be read. Checking only
+    // instanceof Blob or file size would miss an orphaned iOS backing file.
+    const previousHash=await checksum(previous.blob),fileHash=await checksum(file.blob);
+    if(!previousHash&&fileHash){
+      files.set(file.id,{...previous,...file,previewBlob:file.previewBlob||previous.previewBlob});
+      continue;
+    }
+    if(previousHash&&!fileHash){
+      files.set(file.id,{...file,...previous,previewBlob:previous.previewBlob||file.previewBlob});
+      continue;
+    }
+    if(!previousHash&&!fileHash){
+      // Retain both metadata records rather than inventing lost image bytes.
+      files.set(file.id,{...file,...previous});
+      continue;
+    }
+    if(previousHash!==fileHash){
+      // Different readable originals under one ID are retained independently,
+      // using a stable hash ID to avoid duplicates on later reconciliation.
+      const altId=file.id+'-variant-'+fileHash.slice(0,12);
+      if(!files.has(altId)||!present(files.get(altId))){
         files.set(altId,{...file,id:altId,name:'Preserved alternative - '+(file.name||'evidence')});
       }
     }else{
