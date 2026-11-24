@@ -1,7 +1,7 @@
 'use strict';
 
-// Warranty Ease, private-first edition. Records and file blobs stay in IndexedDB.
-// Photos stay on this device. English OCR runs in a separately bundled, same-origin Worker; no third-party API.
+// Records and original files are saved on this device first.
+// English OCR runs locally in a separately bundled, same-origin Worker.
 const DB_NAME = 'warranty-ease-v1';
 const DB_STORE = 'appliances';
 const ACCOUNTS_STORE = 'website-accounts';
@@ -200,7 +200,7 @@ async function hydrateEvidence(row){
 }
 async function refresh() {appliances=await Promise.all((await dbAction('readonly',store=>store.getAll())).map(hydrateEvidence));appliances.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));websiteAccounts=await storeAction(ACCOUNTS_STORE,'readonly',store=>store.getAll());websiteAccounts.sort((a,b)=>String(a.brand).localeCompare(String(b.brand)));vaultMeta=await storeAction(META_STORE,'readonly',store=>store.get('vault'))||null;const last=await storeAction(META_STORE,'readonly',store=>store.get('lastBackup'));lastBackupAt=last?.at||null;}
 async function putRecord(record) {record.updatedAt=new Date().toISOString();const stored=await evidenceForStorage(record);await dbAction('readwrite',store=>store.put(stored));await refresh();window.WarrantyCloud?.scheduleUpload?.();}
-// A tombstone travels in encrypted backups, preventing an older device from reviving deleted entries.
+// A tombstone travels in sync records and recovery archives, preventing an older device from reviving deleted entries.
 async function deleteWithTombstone(storeName,id,kind){
  const deletedAt=new Date().toISOString();
  await new Promise((resolve,reject)=>{
@@ -387,13 +387,13 @@ function renderGrid() {
 }
 function renderSettings() {
   currentView='settings';setNavState();clearUrls('main');
-  root.innerHTML=`<div class="settings-top"><div><div class="eyebrow"><span class="eyebrow-dot"></span> Private, automatic and available offline</div><h1>Sync &amp; privacy.</h1><p>Your appliances, photos, receipts and notes stay on this device and automatically reconcile with your encrypted cloud copy.</p></div>${ico('lock','welcome-doodle')}</div>
+  root.innerHTML=`<div class="settings-top"><div><div class="eyebrow"><span class="eyebrow-dot"></span> Private, automatic and available offline</div><h1>Sync &amp; privacy.</h1><p>Your appliances, photos, receipts and notes stay on this device and automatically sync with your private Cloudflare storage.</p></div>${ico('lock','welcome-doodle')}</div>
   <div id="cloud-ui">${window.WarrantyCloud?.panel?.()||''}</div>
   <div class="settings-grid">
-   <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Available on this device</h3><p>Original pictures and documents are kept locally. The newest verified encrypted cloud copy is also saved on this device for automatic repair when needed.</p><button class="btn btn-line" data-action="device-export">Download device data</button><button class="btn btn-line" data-action="device-import">Import recovered ZIP</button><input type="file" id="device-import-file" accept=".zip,application/zip" hidden><p class="note-muted" id="device-recovery-status" role="status"></p><p class="note-muted" id="storage-info">Checking device storage...</p><p class="we-storage-audit" id="we-storage-audit" role="status">Checking photos...</p></section>
+   <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Available on this device</h3><p>Pictures and documents are kept on this device for offline access. Missing files download automatically when you reconnect.</p><button class="btn btn-line" data-action="device-export">Download device data</button><button class="btn btn-line" data-action="device-import">Import recovered ZIP</button><input type="file" id="device-import-file" accept=".zip,application/zip" hidden><p class="note-muted" id="device-recovery-status" role="status"></p><p class="note-muted" id="storage-info">Checking device storage...</p><p class="we-storage-audit" id="we-storage-audit" role="status">Checking photos...</p></section>
    <section class="settings-card"><div class="settings-icon">${ico('key')}</div><h3>Website logins</h3><p>Website credentials remain encrypted separately from warranty documents.</p><button class="btn btn-line" data-action="logins">${ico('lock')} Manage website logins</button></section>
    <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Photo text recognition</h3><p>Read model labels and receipts on this device. Your original image remains unaltered.</p><button class="btn btn-line btn-sm" data-action="ocr-offline-prepare">Prepare scanner for offline use</button><p class="note-muted" id="ocr-offline-status">The scanner works without internet once its assets are cached.</p></section>
-   <section class="settings-card"><div class="settings-icon">${ico('shield')}</div><h3>How sync protects your records</h3><p>Changes are saved locally first and encrypted before they reach Cloudflare. Each device automatically checks for missing originals and reconciles records. Historical encrypted cloud copies are retained privately for recovery, without a backup manager or manual restore steps.</p><p class="note-muted">Sync runs while Warranty Ease is open and online. iOS may pause closed apps. Do not erase device storage while an issue is being repaired.</p></section>
+   <section class="settings-card"><div class="settings-icon">${ico('shield')}</div><h3>How sync protects your records</h3><p>Changes are saved on this device first. Your passkey or Firebase sign-in protects access to private Cloudflare storage. Website passwords stay encrypted with your separate vault passphrase. Historical encrypted archives are available for recovery.</p><p class="note-muted">Sync runs while Warranty Ease is open and online. iOS may pause closed apps. Do not erase device storage while an issue is being repaired.</p></section>
    <section class="settings-card settings-full"><h3>Optional application diagnostics</h3><p class="note-muted">Shared App Monitor and Firebase activity counts exclude your warranty images, serial numbers and passwords.</p><label class="we-consent-control"><input type="checkbox" id="we-monitor-consent" ${window.WarrantyPlatform?.enabled?.()?'checked':''}> Enable anonymous app-operation diagnostics on this device</label></section>
   </div>`;
   updateStorageEstimate();
@@ -1070,43 +1070,6 @@ async function mergeRestoredRecord(incoming,local){
   return {...merged,files:[...files.values()],
     followUps:window.WarrantyFollowUps?.merge?.(incoming.followUps,local.followUps)||[...(incoming.followUps||[]),...(local.followUps||[])]};
 }
-// Determine whether the locally reconciled state contains information that
-// the newest cloud archive does not yet have. This converges older offline
-// branches without discarding any local-only evidence or notes.
-async function cloudManifestNeedsUpload(zip){
- const entries=await readZip(zip),file=entries.get('warranty-ease-backup.json');
- if(!file)throw Error('Cloud state manifest is missing.');
- const snapshot=JSON.parse(await file.text());
- if(!Array.isArray(snapshot.records))throw Error('Cloud state manifest is invalid.');
- const canonical=value=>{
-   if(Array.isArray(value))return value.map(canonical);
-   if(value&&typeof value==='object'){
-     return Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])]));
-   }
-   return value;
- };
- const equal=(a,b)=>JSON.stringify(canonical(a))===JSON.stringify(canonical(b));
- const remote=new Map(snapshot.records.map(r=>[r.id,r]));
- for(const r of appliances){
-   const old=remote.get(r.id);if(!old)return true;
-   const {files:localFiles=[],...localMeta}=r,{files:remoteFiles=[],...remoteMeta}=old;
-   if(!equal(localMeta,remoteMeta))return true;
-   const remoteFileMap=new Map(remoteFiles.map(f=>[f.id,f]));
-   for(const f of localFiles){
-     const prior=remoteFileMap.get(f.id);if(!prior)return true;
-     const {blob,previewBlob,...localFields}=f;
-     const {path,previewPath,...remoteFields}=prior;
-     if(!equal(localFields,remoteFields))return true;
-     if(previewBlob instanceof Blob&&previewBlob.size&&previewBlob.type==='image/jpeg'&&!previewPath)return true;
-   }
- }
- const remoteAccounts=new Map((snapshot.websiteAccounts||[]).map(x=>[x.id,x]));
- for(const a of websiteAccounts)if(!remoteAccounts.has(a.id)||!equal(a,remoteAccounts.get(a.id)))return true;
- const deletes=await storeAction(META_STORE,'readonly',store=>store.get('syncTombstones'));
- const remoteDeletes=new Map((snapshot.deletions||[]).map(x=>[x.kind+':'+x.id,x.deletedAt]));
- for(const d of deletes?.items||[])if(d.deletedAt>(remoteDeletes.get(d.kind+':'+d.id)||''))return true;
- return false;
-}
 function validEvidenceBytes(b,mime=''){
  if(!b?.length)return false;
  const zip=b[0]===80&&b[1]===75&&b[2]===3&&b[3]===4;
@@ -1122,7 +1085,7 @@ async function recoverEvidenceBytes(bytes,path,mime,depth=0){
  if(depth>=3||bytes[0]!==80||bytes[1]!==75)return null;
  try{const nested=await readZip(bytes,{asBytes:true});const exact=nested.get(path);return exact?await recoverEvidenceBytes(exact,path,mime,depth+1):null;}catch{return null;}
 }
-async function applyRestoredZip(zip,{automatic=false}={}){
+async function applyRestoredZip(zip,{automatic=false,canApply=()=>true}={}){
  const entries=await readZip(zip,{asBytes:true}),data=entries.get('warranty-ease-backup.json');
  if(!data)throw new Error('The backup manifest is missing');
  const json=JSON.parse(decoder.decode(data));
@@ -1163,6 +1126,7 @@ async function applyRestoredZip(zip,{automatic=false}={}){
  if(!automatic&&!window.confirm('Restore '+restored.length+' appliance(s) and '+incomingAccounts.length+' encrypted website login(s)? Existing local evidence is kept.'))return false;
  const storedRestored=[];for(const row of restored)storedRestored.push(await evidenceForStorage(row));
  await ensureStorage();
+ if(!canApply())return false;
  // All appliance records, vault entries and deletion history commit together.
  await new Promise((resolve,reject)=>{
   let tx;try{tx=db.transaction([DB_STORE,ACCOUNTS_STORE,META_STORE],'readwrite');}catch(e){if(e?.name==='InvalidStateError')db=null;reject(e);return;}
@@ -1461,12 +1425,6 @@ document.addEventListener('input',()=>touchVault());
  try{
   if(!('indexedDB'in window))throw new Error('IndexedDB is unavailable');
   db=await openDB();await refresh();renderHome();
-   // Legacy snapshots do not carry JPEG thumbnails. Derive them on capable
-   // devices and publish the display-safe copy encrypted with the original.
-   for(const record of appliances){
-     const need=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&f.blob instanceof Blob&&f.blob.size);
-     // Preview regeneration deferred until recovery is stable.
-   }
    void window.WarrantyCloud?.start?.().catch(error=>console.warn('Cloud reconnect will retry:',error?.message||error));
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js',{scope:'/WarrantyEase/'}).catch(()=>{});
  }catch(err){

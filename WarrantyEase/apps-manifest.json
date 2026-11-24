@@ -8,5 +8,5 @@
   },
   "ui": {"mode": "headless"},
   "versionLab": {"enabled": true, "managed": false, "developerOnly": true},
-  "meta": {"storage": "device-first", "cloud": "encrypted-r2-snapshots", "firebaseProject": "kk-syllabus"}
+  "meta": {"storage": "device-first", "cloud": "private-r2-incremental", "firebaseProject": "kk-syllabus"}
 }
