@@ -179,6 +179,9 @@ window.WarrantyCloud=(()=>{
   }
 
   async function beforeCloudUse(){
+    mark("Verifying cloud connection");await list({quiet:true});
+    if(latest()){mark("Verifying archive passphrase");await decryptBackupBlob(await getEncrypted(latest().id),state.passphrase);}
+    await rememberConnection();
     await syncNow({force:true});
     try{await rememberConnection()}
     catch(error){state.error='Sync connected, but this browser cannot remember credentials. Reconnect after reopening.';console.warn('Encrypted device session could not be saved:',error?.message||error)}
@@ -329,9 +332,9 @@ window.WarrantyCloud=(()=>{
       state.checkpointTimer=0;
       if(state.uploading||editing()){queueDeviceCheckpoint();return}
       try{
-        const raw=await createRawBackupZip();
-        const blob=await encryptBackupBytes(new Uint8Array(await raw.arrayBuffer()),state.passphrase);
-        await saveDeviceCheckpoint(new Uint8Array(await blob.arrayBuffer()));
+        const raw=await createRawBackupZip({asBytes:true});
+        const bytes=await encryptBackupBytes(raw,state.passphrase,{asBytes:true});
+        await saveDeviceCheckpoint(bytes);
       }catch(error){console.warn('Device checkpoint unavailable:',error?.message||error)}
       redraw();
     },9000);
@@ -352,7 +355,7 @@ window.WarrantyCloud=(()=>{
         error.code='WE_LOCAL_EVIDENCE_UNREADABLE';throw error;
       }
       let raw;
-      try{mark("Building upload archive");raw=await createRawBackupZip();}
+      try{mark("Building upload archive");raw=await createRawBackupZip({asBytes:true});}
       catch(error){
         if(['NotFoundError','NotReadableError'].includes(error?.name)){
           const unavailable=new Error('An original photo or receipt became unreadable while preparing sync. No incomplete archive was uploaded. Cloud recovery will retry.');
@@ -360,8 +363,8 @@ window.WarrantyCloud=(()=>{
         }
         throw error;
       }
-      mark("Encrypting upload archive");const encrypted=await encryptBackupBytes(new Uint8Array(await raw.arrayBuffer()),state.passphrase);
-      const bytes=await encrypted.arrayBuffer();
+      mark("Encrypting upload bytes");const bytes=await encryptBackupBytes(raw,state.passphrase,{asBytes:true});
+      mark("Hashing upload bytes");
       const transfer=window.WarrantyCloudChunks;
       if(!transfer)throw Error('Encrypted transfer module is unavailable; reload the app.');
       if(bytes.byteLength>transfer.MAX_TOTAL)throw Error('Archive exceeds the 144 MB encrypted upload limit. Original data remains local.');
