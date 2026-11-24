@@ -54,7 +54,7 @@ window.WarrantyCloud=(()=>{
   const trace=[];let stage='',stageAt=0,validatedAt=0;const failedHistory=new Set();
   function safeError(e){const m=String(e?.message||'');return /original photo\/file\(s\) remain unavailable|Local originals changed/i.test(m)?'ORIGINALS_UNREADABLE':/not safely cached|cached safely/i.test(m)?'CACHE_WRITE_FAILED':e?.code==='WE_ARCHIVE_UNLOCK'?'ARCHIVE_UNLOCK':/different website-login vault keys/i.test(m)?'VAULT_KEY_CONFLICT':/Missing file:/i.test(m)?'ARCHIVE_FILE_MISSING':/manifest/i.test(m)?'MANIFEST_INVALID':/deletion history/i.test(m)?'DELETION_HISTORY_INVALID':/Invalid record/i.test(m)?'RECORD_INVALID':/Invalid encrypted login|Incomplete account vault/i.test(m)?'VAULT_INVALID':/interrupted/i.test(m)?'MERGE_INTERRUPTED':['OperationError','NotFoundError','NotReadableError','AbortError','TimeoutError','QuotaExceededError','TypeError','DataError','InvalidStateError'].includes(e?.name)?e.name:'UNKNOWN_ERROR';}
   function mark(label){stage=label;stageAt=Date.now();trace.push(new Date().toISOString()+' '+label);if(trace.length>120)trace.shift();tick();}
-  function report(){return ['Recovery paused: '+recoveryPaused,'Warranty Ease sync diagnostics v0.9.9','Online: '+navigator.onLine,'Connected: '+state.connected,'Verified: '+state.verified,'Pending edits: '+state.needsSync,'Local records: '+localCount(),'Missing originals: '+missingOriginals().length,'Cloud archives: '+state.backups.length,'Stage: '+stage,'Stage seconds: '+(stageAt?Math.floor((Date.now()-stageAt)/1000):0),'---',...trace].join('\n');}
+  function report(){return ['Recovery paused: '+recoveryPaused,'Warranty Ease sync diagnostics v0.9.11','Online: '+navigator.onLine,'Connected: '+state.connected,'Verified: '+state.verified,'Pending edits: '+state.needsSync,'Local records: '+localCount(),'Missing originals: '+missingOriginals().length,'Cloud archives: '+state.backups.length,'Stage: '+stage,'Stage seconds: '+(stageAt?Math.floor((Date.now()-stageAt)/1000):0),'---',...trace].join('\n');}
   function tick(){const p=document.getElementById('sync-debug-report');if(p)p.textContent=report();const q=document.querySelector?.('#cloud-ui .cloud-status');if(q&&state.busy){const x=indication();q.textContent=x.label+' · '+x.detail;}}
   if(typeof setInterval==='function')setInterval(tick,1000);
   async function copyReport(){try{await navigator.clipboard.writeText(report());toast('Diagnostic report copied');}catch{toast('Select and copy the diagnostic text below.');}}
@@ -71,6 +71,7 @@ window.WarrantyCloud=(()=>{
     }
     return {label:'Synced',tone:'ok',detail:'Appliances, original photos and receipts are saved here and in your private encrypted cloud copy.'};
   }
+  let exportBusy=false;
   function panel(){
     const status=indication(),online=navigator.onLine;
     const form=!state.connected?`<div class="cloud-form">
@@ -90,13 +91,13 @@ window.WarrantyCloud=(()=>{
         <p class="cloud-hint">Your photos and encrypted cloud history have not been cleared. Do not choose a new passphrase.</p>
       </div>`:''}
       <details class="cloud-fallback"><summary>Connection settings</summary><button type="button" class="btn btn-ghost btn-sm" data-action="cloud-logout">Disconnect this device</button></details>`;
-    return `<section class="cloud-panel"><div class="cloud-head"><span class="cloud-symbol">☁</span><div><h3>Cloud sync</h3><p class="cloud-status" role="status"><strong>${esc(status.label)}</strong> · ${esc(status.detail)}</p></div></div>${form}<details id="sync-debug"><summary>Sync diagnostics</summary><button class="btn btn-line" data-action="cloud-copy-debug">Copy diagnostic report</button><pre id="sync-debug-report" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto">${esc(report())}</pre></details></section>`;
+    return `<section class="cloud-panel"><div class="cloud-head"><span class="cloud-symbol">☁</span><div><h3>Cloud sync</h3><p class="cloud-status" role="status"><strong>${esc(status.label)}</strong> · ${esc(status.detail)}</p></div></div>${form}${state.connected?`<details id="cloud-export"><summary>Download cloud data</summary><p class="cloud-hint">Read-only recovery. ZIP files contain private records and original photos.</p><button class="btn btn-line" data-action="cloud-export-list" ${exportBusy?"disabled":""}>List cloud archives</button>${state.backups.map(b=>`<div><span>${esc(fmt(b.created))}</span> <button class="btn btn-line btn-sm" data-action="cloud-export-plain" data-id="${esc(b.id)}" ${exportBusy?"disabled":""}>Download ZIP</button> <button class="btn btn-ghost btn-sm" data-action="cloud-export-encrypted" data-id="${esc(b.id)}" ${exportBusy?"disabled":""}>Encrypted file</button></div>`).join("")}</details>`:""}<details id="sync-debug"><summary>Sync diagnostics</summary><button class="btn btn-line" data-action="cloud-copy-debug">Copy diagnostic report</button><pre id="sync-debug-report" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto">${esc(report())}</pre></details></section>`;
   }
   function banner(){
     const status=indication();
     return '<button type="button" class="sync-indicator" data-tone="'+status.tone+'" data-action="settings" aria-label="Cloud sync: '+esc(status.label)+'. Open sync settings" title="'+esc(status.detail)+'">'+esc(status.label)+'</button>';
   }
-  function redraw(){const target=document.getElementById('cloud-ui');if(target){const open=document.getElementById('sync-debug')?.open;target.innerHTML=panel();if(open){const d=document.getElementById('sync-debug');if(d)d.open=true;}}const bannerNode=document.getElementById('we-cloud-banner');if(bannerNode)bannerNode.innerHTML=banner();}
+  function redraw(){const target=document.getElementById('cloud-ui');if(target){const open=document.getElementById('sync-debug')?.open,exportOpen=document.getElementById('cloud-export')?.open;target.innerHTML=panel();if(exportOpen){const e=document.getElementById('cloud-export');if(e)e.open=true;}if(open){const d=document.getElementById('sync-debug');if(d)d.open=true;}}const bannerNode=document.getElementById('we-cloud-banner');if(bannerNode)bannerNode.innerHTML=banner();}
   async function jsonResponse(response){const d=await response.json().catch(()=>({}));if(!response.ok)throw new Error(String(d?.error?.message||d?.error||d?.message||`HTTP ${response.status}`));return d;}
   async function requestFirebaseToken(){
     if(state.expires>Date.now()+60e3)return state.token;
@@ -601,7 +602,18 @@ window.WarrantyCloud=(()=>{
     state.autoTimer=setTimeout(()=>{state.autoTimer=0;syncNow().catch(()=>{})},2500);
     redraw();
   }
+  async function exportArchive(action,id){
+    if(exportBusy)return;exportBusy=true;redraw();
+    try{if(action==='cloud-export-list'){await list({quiet:true});return;}
+      if(!state.backups.some(b=>b.id===id))throw Error('List cloud archives first.');
+      const encrypted=await getEncrypted(id);
+      if(action==='cloud-export-encrypted'){downloadBlob(encrypted,'WarrantyEase-'+id+'.encrypted');return;}
+      if(!state.passphrase)throw Error('Unlock existing cloud data first.');
+      const zip=await decryptBackupBlob(encrypted,state.passphrase);downloadBlob(zip,'WarrantyEase-'+id+'.zip');
+    }catch(error){toast((error.name||'Error')+': '+error.message);}finally{exportBusy=false;redraw();}
+  }
   function handle(action,id){
+    if(['cloud-export-list','cloud-export-plain','cloud-export-encrypted'].includes(action)){void exportArchive(action,id);return true;}
     if(action==='cloud-resume-recovery'){void syncNow({force:true}).catch(()=>{});return true;}
     if(action==='cloud-copy-debug'){void copyReport();return true;}
     const invoke={'cloud-passkey':passkeyLogin,'cloud-login':firebaseLogin,'cloud-unlock':unlock,'cloud-logout':disconnect}[action];
