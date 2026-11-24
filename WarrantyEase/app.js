@@ -169,7 +169,7 @@ async function saveEvidence(blob){
  const cache=await evidenceCache(),key=evidenceURL(hash);
  if(!await cache.match(key))await cache.put(key,new Response(bytes,{headers:{'Content-Type':blob.type||'application/octet-stream'}}));
  const saved=await cache.match(key);if(!saved)throw Error('EVIDENCE_CACHE_WRITE_FAILED');
- const check=await saved.arrayBuffer();if(check.byteLength!==bytes.byteLength)throw Error('EVIDENCE_CACHE_LENGTH_MISMATCH');
+ const check=await saved.arrayBuffer();const checkHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',check)),b=>b.toString(16).padStart(2,'0')).join('');if(checkHash!==hash||check.byteLength!==bytes.byteLength)throw Error('EVIDENCE_CACHE_LENGTH_MISMATCH');
  return hash;
 }
 async function evidenceForStorage(row){
@@ -800,8 +800,8 @@ async function buildZip(items,{asBytes=false}={}) {
  if(asBytes){const result=new Uint8Array(offset+centralSize+end.length);let pos=0;for(const part of parts){result.set(part,pos);pos+=part.byteLength;}return result;}
  return new Blob(parts,{type:'application/zip'});
 }
-function readZip(blob) {
- return blob.arrayBuffer().then(buffer=>{
+function readZip(blob,{asBytes=false}={}) {
+ return (blob instanceof Uint8Array?Promise.resolve(blob.slice().buffer):blob.arrayBuffer()).then(buffer=>{
   const view=new DataView(buffer),bytes=new Uint8Array(buffer),entries=new Map();
   let end=-1;for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--)if(view.getUint32(i,true)===0x06054b50){end=i;break;}
   if(end<0)throw new Error('Not a supported ZIP file');
@@ -814,7 +814,7 @@ function readZip(blob) {
    if(!name||name.startsWith('/')||name.includes('../'))throw new Error('Unexpected backup path');
    if(view.getUint32(localPos,true)!==0x04034b50)throw new Error('Invalid ZIP file header');
    const from=localPos+30+view.getUint16(localPos+26,true)+view.getUint16(localPos+28,true);
-   if(from+size>bytes.length)throw Error('Invalid ZIP file bounds');entries.set(name,new Blob([bytes.slice(from,from+size)]));pos+=46+nlen+extra+comment;
+   if(from+size>bytes.length)throw Error('Invalid ZIP file bounds');const entry=bytes.slice(from,from+size);if(crc32(entry)!==view.getUint32(pos+16,true))throw Error('ZIP entry checksum mismatch');entries.set(name,asBytes?entry:new Blob([entry]));pos+=46+nlen+extra+comment;
   }
   return entries;
  });
@@ -837,14 +837,14 @@ async function createRawBackupZip({asBytes=false}={}){
   for(const f of r.files||[]){
     if(!(f.blob instanceof Blob)||!f.blob.size)throw Error('Missing original evidence file '+f.name+'. Automatic repair is required before syncing.');
     const path=`files/${r.id}/${f.id}_${safeFileName(f.name)}`;
-    items.push({name:path,data:f.blob});
+    const originalBytes=new Uint8Array(await f.blob.arrayBuffer());if(!validEvidenceBytes(originalBytes,f.mime))throw Error('CORRUPT_EVIDENCE: '+f.name);items.push({name:path,data:originalBytes});
     const {blob,previewBlob,...meta}=f;
     if(previewBlob instanceof Blob&&previewBlob.size&&previewBlob.type==='image/jpeg'){
       const previewPath=`previews/${r.id}/${f.id}.jpg`;
       // A derived preview must never prevent the original evidence from syncing.
       try {
         const bytes=await previewBlob.arrayBuffer();
-        items.push({name:previewPath,data:new Uint8Array(bytes)});
+        if(!validEvidenceBytes(new Uint8Array(bytes),'image/jpeg')){clone.files.push({...meta,path});continue;}items.push({name:previewPath,data:new Uint8Array(bytes)});
         clone.files.push({...meta,path,previewPath});
       } catch(error) {
         if(!['NotFoundError','NotReadableError'].includes(error?.name))throw error;
@@ -954,10 +954,11 @@ async function mergeRestoredRecord(incoming,local){
   }
   const files=new Map((main.files||[]).map(f=>[f.id,f]));
   const present=f=>f?.blob instanceof Blob&&f.blob.size>0;
-  const checksum=async blob=>{
+  const checksum=async (blob,mime)=>{
     if(!(blob instanceof Blob)||!blob.size)return null;
     try{
       const buffer=await blob.arrayBuffer();
+      if(!validEvidenceBytes(new Uint8Array(buffer),mime))return null;
       const digest=await crypto.subtle.digest('SHA-256',buffer);
       return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
     }catch(error){
@@ -982,7 +983,7 @@ async function mergeRestoredRecord(incoming,local){
     }
     // Hashing also verifies the bytes can actually be read. Checking only
     // instanceof Blob or file size would miss an orphaned iOS backing file.
-    const previousHash=await checksum(previous.blob),fileHash=await checksum(file.blob);
+    const previousHash=await checksum(previous.blob,previous.mime),fileHash=await checksum(file.blob,file.mime);
     if(!previousHash&&fileHash){
       files.set(file.id,{...previous,...file,previewBlob:file.previewBlob||previous.previewBlob});
       continue;
@@ -1062,10 +1063,25 @@ async function cloudManifestNeedsUpload(zip){
  for(const d of deletes?.items||[])if(d.deletedAt>(remoteDeletes.get(d.kind+':'+d.id)||''))return true;
  return false;
 }
+function validEvidenceBytes(b,mime=''){
+ if(!b?.length)return false;
+ const zip=b[0]===80&&b[1]===75&&b[2]===3&&b[3]===4;
+ if(zip)return false;
+ if(mime==='application/pdf')return b[0]===37&&b[1]===80&&b[2]===68&&b[3]===70;
+ if(mime==='image/jpeg')return b[0]===255&&b[1]===216&&b[2]===255;
+ if(mime==='image/png')return b[0]===137&&b[1]===80&&b[2]===78&&b[3]===71;
+ if(mime==='image/webp')return String.fromCharCode(...b.subarray(0,4))==='RIFF'&&String.fromCharCode(...b.subarray(8,12))==='WEBP';
+ return true;
+}
+async function recoverEvidenceBytes(bytes,path,mime,depth=0){
+ if(validEvidenceBytes(bytes,mime))return bytes;
+ if(depth>=3||bytes[0]!==80||bytes[1]!==75)return null;
+ try{const nested=await readZip(bytes,{asBytes:true});const exact=nested.get(path);return exact?await recoverEvidenceBytes(exact,path,mime,depth+1):null;}catch{return null;}
+}
 async function applyRestoredZip(zip,{automatic=false}={}){
- const entries=await readZip(zip),data=entries.get('warranty-ease-backup.json');
+ const entries=await readZip(zip,{asBytes:true}),data=entries.get('warranty-ease-backup.json');
  if(!data)throw new Error('The backup manifest is missing');
- const json=JSON.parse(await data.text());
+ const json=JSON.parse(decoder.decode(data));
  if(json.app!=='Warranty Ease'||![1,2,3].includes(json.version)||!Array.isArray(json.records))throw new Error('Unsupported backup version');
  const incomingAccounts=json.version>=2?json.websiteAccounts||[]:[];
  const incomingVault=json.version>=2?json.websiteVault||null:null;
@@ -1088,8 +1104,11 @@ async function applyRestoredZip(zip,{automatic=false}={}){
   for(const f of r.files){
    if(!f.path||!entries.has(f.path))throw new Error('Missing file: '+String(f.name));
    const {path,previewPath,...meta}=f;
-   const original=new Blob([await entries.get(path).arrayBuffer()],{type:meta.mime||'application/octet-stream'});
-   const preview=previewPath&&entries.has(previewPath)?new Blob([await entries.get(previewPath).arrayBuffer()],{type:'image/jpeg'}):null;
+   const originalBytes=await recoverEvidenceBytes(entries.get(path),path,meta.mime);
+   const previewBytes=previewPath&&entries.has(previewPath)?await recoverEvidenceBytes(entries.get(previewPath),previewPath,'image/jpeg'):null;
+   delete meta.originalHash;delete meta.previewHash;
+   const original=originalBytes?new Blob([originalBytes],{type:meta.mime||'application/octet-stream'}):null;
+   const preview=previewBytes?new Blob([previewBytes],{type:'image/jpeg'}):null;
    row.files.push({...meta,blob:original,...(preview?.size?{previewBlob:preview}:{})});
   }
   const merged=await mergeRestoredRecord(row,getRecord(row.id));
