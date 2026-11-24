@@ -1,9 +1,9 @@
 /* Warranty Ease scoped offline shell; adapted from shared Apps PWA v1 conventions. */
-const CACHE='warranty-ease-v10-0';
+const CACHE='warranty-ease-v10-1';
 const PREFIX='warranty-ease-v';
 const OCR_CACHE='warranty-ease-ocr-v7';
 const PASSKEY_SCRIPT='/Apps/apps-passkey-auth.js';
-const ASSETS=['./','./index.html','./release-check.js?v=1.0.0','./style.css?v=1.0.0','./improvements.css?v=1.0.0','./media.css?v=1.0.0','./followups.css?v=1.0.0','./wallet.css?v=1.0.0','./followups.js?v=1.0.0','./followups-ui.js?v=1.0.0','./media.js?v=1.0.0','./resources.js?v=1.0.0','./cloud-chunks.js?v=1.0.0','./app.js?v=1.0.0','./platform.js?v=1.0.0','./apps-manifest.json','./incremental-sync.js?v=1.0.0','./cloud.js?v=1.0.0','./boot.mjs?v=1.0.0','./ocr-control.js?v=1.0.0','./ocr-extract.js?v=1.0.0','./ocr-crop.js?v=1.0.0','./ocr-runner.js?v=1.0.0','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
+const ASSETS=['./','./index.html','./release-check.js?v=1.0.1','./style.css?v=1.0.1','./improvements.css?v=1.0.1','./media.css?v=1.0.1','./followups.css?v=1.0.1','./wallet.css?v=1.0.1','./followups.js?v=1.0.1','./followups-ui.js?v=1.0.1','./media.js?v=1.0.1','./resources.js?v=1.0.1','./cloud-chunks.js?v=1.0.1','./app.js?v=1.0.1','./platform.js?v=1.0.1','./apps-manifest.json','./incremental-sync.js?v=1.0.1','./cloud.js?v=1.0.1','./boot.mjs?v=1.0.1','./ocr-control.js?v=1.0.1','./ocr-extract.js?v=1.0.1','./ocr-crop.js?v=1.0.1','./ocr-runner.js?v=1.0.1','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await cache.addAll(ASSETS.map(url=>new Request(url,{cache:'reload'})));await cache.add(PASSKEY_SCRIPT).catch(()=>{});await self.skipWaiting();})());});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith(PREFIX)&&k!==CACHE&&k!==OCR_CACHE).map(k=>caches.delete(k)));await self.clients.claim();})());});
 self.addEventListener('fetch',event=>{
