@@ -1019,7 +1019,7 @@ async function mergeRestoredRecord(incoming,local){
   // Remove only invalid generated alternatives when their parent original is verified.
   // Unique missing evidence and valid alternatives remain recoverable.
   for(const [id,file] of files){
-    const match=String(id).match(/^(.+)-variant-[a-f0-9]{12}$/);
+    const match=String(id).match(/^(.+?)(?:-device|-variant-[a-f0-9]{12})+$/);
     if(!match)continue;
     const parent=files.get(match[1]);
     if(parent&&await checksum(parent.blob,parent.mime)&&!await checksum(file.blob,file.mime))files.delete(id);
