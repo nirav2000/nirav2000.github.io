@@ -947,7 +947,7 @@ async function restoreEncryptedBackup(){
  }catch(e){console.error(e);toast(e.name==='OperationError'?'Incorrect archive passphrase or damaged backup.':`Restore failed: ${e.message||'Invalid backup'}`);}
 }
 async function mergeRestoredRecord(incoming,local){
-  if(!local)return incoming;
+  if(!local)local={id:incoming.id,files:[],followUps:[]};
   // Both devices retain their metadata and independent evidence. Prefer the
   // latest nonempty values without discarding valid local-only originals.
   const newerLocal=(Date.parse(local.updatedAt||'')||0)>=(Date.parse(incoming.updatedAt||'')||0);
@@ -1015,6 +1015,14 @@ async function mergeRestoredRecord(incoming,local){
       }
       files.set(file.id,chosen);
     }
+  }
+  // Remove only invalid generated alternatives when their parent original is verified.
+  // Unique missing evidence and valid alternatives remain recoverable.
+  for(const [id,file] of files){
+    const match=String(id).match(/^(.+)-variant-[a-f0-9]{12}$/);
+    if(!match)continue;
+    const parent=files.get(match[1]);
+    if(parent&&await checksum(parent.blob,parent.mime)&&!await checksum(file.blob,file.mime))files.delete(id);
   }
   // Prefer readable derived previews; originals remain authoritative.
   for(const [id,originalFile] of files){
