@@ -28,7 +28,7 @@ window.WarrantyCloud=(()=>{
     try{return appliances.flatMap(r=>(r.files||[])
       .filter(f=>!(f.blob instanceof Blob)||f.blob.size===0||
         state.unreadableOriginalIds.has(evidenceKey(r,f)))
-      .map(f=>({record:r.id,file:f.id})));
+      .map(f=>({record:r.id,file:f.id,name:f.name,appliance:r.productName||r.brand||r.id})));
     }catch{return [];}
   };
   async function inspectLocalOriginals(){
@@ -54,7 +54,7 @@ window.WarrantyCloud=(()=>{
   const trace=[];let stage='',stageAt=0,validatedAt=0;const failedHistory=new Set();
   function safeError(e){const m=String(e?.message||'');return /original photo\/file\(s\) remain unavailable|Local originals changed/i.test(m)?'ORIGINALS_UNREADABLE':/not safely cached|cached safely/i.test(m)?'CACHE_WRITE_FAILED':e?.code==='WE_ARCHIVE_UNLOCK'?'ARCHIVE_UNLOCK':/different website-login vault keys/i.test(m)?'VAULT_KEY_CONFLICT':/Missing file:/i.test(m)?'ARCHIVE_FILE_MISSING':/manifest/i.test(m)?'MANIFEST_INVALID':/deletion history/i.test(m)?'DELETION_HISTORY_INVALID':/Invalid record/i.test(m)?'RECORD_INVALID':/Invalid encrypted login|Incomplete account vault/i.test(m)?'VAULT_INVALID':/interrupted/i.test(m)?'MERGE_INTERRUPTED':['OperationError','NotFoundError','NotReadableError','AbortError','TimeoutError','QuotaExceededError','TypeError','DataError','InvalidStateError'].includes(e?.name)?e.name:'UNKNOWN_ERROR';}
   function mark(label){stage=label;stageAt=Date.now();trace.push(new Date().toISOString()+' '+label);if(trace.length>120)trace.shift();tick();}
-  function report(){return ['Recovery paused: '+recoveryPaused,'Warranty Ease sync diagnostics v0.9.14','Online: '+navigator.onLine,'Connected: '+state.connected,'Verified: '+state.verified,'Pending edits: '+state.needsSync,'Local records: '+localCount(),'Missing originals: '+missingOriginals().length,'Cloud archives: '+state.backups.length,'Stage: '+stage,'Stage seconds: '+(stageAt?Math.floor((Date.now()-stageAt)/1000):0),'---',...trace].join('\n');}
+  function report(){return ['Recovery paused: '+recoveryPaused,'Warranty Ease sync diagnostics v0.9.15','Online: '+navigator.onLine,'Connected: '+state.connected,'Verified: '+state.verified,'Pending edits: '+state.needsSync,'Local records: '+localCount(),'Missing originals: '+missingOriginals().length,'Cloud archives: '+state.backups.length,'Stage: '+stage,'Stage seconds: '+(stageAt?Math.floor((Date.now()-stageAt)/1000):0),...missingOriginals().map(f=>'Missing: '+f.appliance+' / '+f.name+' ['+f.record+'/'+f.file+']'),'---',...trace].join('\n');}
   function tick(){const p=document.getElementById('sync-debug-report');if(p)p.textContent=report();const q=document.querySelector?.('#cloud-ui .cloud-status');if(q&&state.busy){const x=indication();q.textContent=x.label+' · '+x.detail;}}
   if(typeof setInterval==='function')setInterval(tick,1000);
   async function copyReport(){try{await navigator.clipboard.writeText(report());toast('Diagnostic report copied');}catch{toast('Select and copy the diagnostic text below.');}}
@@ -181,7 +181,7 @@ window.WarrantyCloud=(()=>{
 
   async function beforeCloudUse(){
     mark("Verifying cloud connection");await list({quiet:true});
-    if(latest()){mark("Verifying archive passphrase");await decryptBackupBlob(await getEncrypted(latest().id),state.passphrase);}
+    if(latest()){mark("Verifying archive passphrase");await unlockArchive(latest().id);}
     await rememberConnection();
     await syncNow({force:true});
     try{await rememberConnection()}
@@ -440,14 +440,14 @@ window.WarrantyCloud=(()=>{
         // before making ANY changes to local records. An old archive may use a
         // different historic key and must never prevent validating the head.
         if(shouldReadLatest){
-          mark("Downloading newest archive");latestEncrypted=await getEncrypted(remoteLatest.id);
-          mark("Decrypting newest archive");latestZip=await decryptBackupBlob(latestEncrypted,state.passphrase);
+          mark("Downloading newest archive");
+          try{({encrypted:latestEncrypted,zip:latestZip}=await unlockArchive(remoteLatest.id));}
+          catch(error){mark('Newest archive unavailable; checking historical copies');for(const older of state.backups.slice(1)){try{const recovered=await unlockArchive(older.id);await applyRestoredZip(recovered.zip,{automatic:true});await inspectLocalOriginals();mark('Historical recovery succeeded');}catch(e){mark('Historical recovery failed: '+safeError(e));}}throw error;}
         }
         async function mergeOlder(remote){
           if(failedHistory.has(remote.id))return;
           try{
-            mark("Downloading historical archive");const encrypted=await getEncrypted(remote.id);
-            mark("Decrypting historical archive");const zip=await decryptBackupBlob(encrypted,state.passphrase);
+            mark("Downloading historical archive");const {zip}=await unlockArchive(remote.id);
             mark("Merging historical archive");if(await applyRestoredZip(zip,{automatic:true})!==true)throw Error('Historical cloud reconciliation was interrupted.');
             await inspectLocalOriginals();
             processed.add(remote.id);
@@ -551,13 +551,24 @@ window.WarrantyCloud=(()=>{
     if(await applyRestoredZip(zip)){scheduleUpload();toast('Encrypted device records recovered safely.');}
   }
 
-  async function getEncrypted(id){
+  async function getEncrypted(id,{fresh=false}={}){
     if(!/^[A-Za-z0-9_-]{5,80}$/.test(id))throw Error('Invalid cloud archive identifier.');
-     const transfer=window.WarrantyCloudChunks;
-     if(!transfer)throw Error('The encrypted cloud restore module is not installed. Reload the app.');
-     if(archiveMemory.has(id)){mark('Reusing downloaded archive');return archiveMemory.get(id);}
-     const cache=await caches.open('we-private-encrypted-recovery-v1');const key=new Request(new URL('./encrypted-recovery/'+id,location.href));const saved=await cache.match(key);if(saved){const blob=await saved.blob();archiveMemory.set(id,blob);mark('Reusing cached encrypted archive');return blob;}
-     const blob=await transfer.download(id,{send:(path,options)=>authorised(API+path,options),onProgress:({part,total})=>{mark('Received encrypted part '+part+' of '+total)}});archiveMemory.set(id,blob);try{await cache.put(key,new Response(blob));}catch{}return blob;
+    const transfer=window.WarrantyCloudChunks;
+    const cache=await caches.open('we-private-encrypted-recovery-v1'),key=new Request(new URL('./encrypted-recovery/'+id,location.href));
+    const expected=state.backups.find(x=>x.id===id);
+    const valid=async blob=>{try{const bytes=await blob.arrayBuffer();return (!expected?.sha||await transfer.digest(bytes)===expected.sha)&&new TextDecoder().decode(bytes.slice(0,8))==='WEASE02!';}catch{return false;}};
+    if(!fresh){const saved=archiveMemory.get(id)||await cache.match(key).then(x=>x?.blob());if(saved&&await valid(saved)){mark('Reusing verified encrypted archive');return saved;}}
+    const blob=await transfer.download(id,{send:(path,options)=>authorised(API+path,options),onProgress:({part,total})=>mark('Received encrypted part '+part+' of '+total)});
+    if(!await valid(blob))throw Error('Encrypted archive integrity check failed');
+    archiveMemory.set(id,blob);try{await cache.put(key,new Response(blob));}catch{}return blob;
+  }
+  async function unlockArchive(id){
+    let encrypted=await getEncrypted(id);
+    try{return {encrypted,zip:await decryptBackupBlob(encrypted,state.passphrase)};}catch(e){
+      if(e.code!=='WE_ARCHIVE_UNLOCK')throw e;
+      mark('Retrying archive from cloud without cache');encrypted=await getEncrypted(id,{fresh:true});
+      return {encrypted,zip:await decryptBackupBlob(encrypted,state.passphrase)};
+    }
   }
   async function restore(id){
     if(!state.passphrase)throw Error('Enter the cloud encryption passphrase first.');
