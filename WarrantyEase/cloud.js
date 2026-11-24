@@ -51,9 +51,10 @@ window.WarrantyCloud=(()=>{
     state.unreadableOriginalIds=unreadable;
     return missingOriginals();
   }
-  const trace=[];let stage='',stageAt=0;
+  const trace=[];let stage='',stageAt=0,validatedAt=0;const failedHistory=new Set();
+  function safeError(e){const m=String(e?.message||'');return e?.code==='WE_ARCHIVE_UNLOCK'?'ARCHIVE_UNLOCK':/different website-login vault keys/i.test(m)?'VAULT_KEY_CONFLICT':/Missing file:/i.test(m)?'ARCHIVE_FILE_MISSING':/manifest/i.test(m)?'MANIFEST_INVALID':/deletion history/i.test(m)?'DELETION_HISTORY_INVALID':/Invalid record/i.test(m)?'RECORD_INVALID':/Invalid encrypted login|Incomplete account vault/i.test(m)?'VAULT_INVALID':/interrupted/i.test(m)?'MERGE_INTERRUPTED':['OperationError','NotFoundError','NotReadableError','AbortError','TimeoutError','QuotaExceededError','TypeError','DataError','InvalidStateError'].includes(e?.name)?e.name:'UNKNOWN_ERROR';}
   function mark(label){stage=label;stageAt=Date.now();trace.push(new Date().toISOString()+' '+label);if(trace.length>120)trace.shift();tick();}
-  function report(){return ['Warranty Ease sync diagnostics v0.9.4','Online: '+navigator.onLine,'Connected: '+state.connected,'Verified: '+state.verified,'Pending edits: '+state.needsSync,'Local records: '+localCount(),'Missing originals: '+missingOriginals().length,'Cloud archives: '+state.backups.length,'Stage: '+stage,'Stage seconds: '+Math.floor((Date.now()-stageAt)/1000),'---',...trace].join('\n');}
+  function report(){return ['Warranty Ease sync diagnostics v0.9.5','Online: '+navigator.onLine,'Connected: '+state.connected,'Verified: '+state.verified,'Pending edits: '+state.needsSync,'Local records: '+localCount(),'Missing originals: '+missingOriginals().length,'Cloud archives: '+state.backups.length,'Stage: '+stage,'Stage seconds: '+(stageAt?Math.floor((Date.now()-stageAt)/1000):0),'---',...trace].join('\n');}
   function tick(){const p=document.getElementById('sync-debug-report');if(p)p.textContent=report();const q=document.querySelector?.('#cloud-ui .cloud-status');if(q&&state.busy){const x=indication();q.textContent=x.label+' · '+x.detail;}}
   if(typeof setInterval==='function')setInterval(tick,1000);
   async function copyReport(){try{await navigator.clipboard.writeText(report());toast('Diagnostic report copied');}catch{toast('Select and copy the diagnostic text below.');}}
@@ -63,6 +64,7 @@ window.WarrantyCloud=(()=>{
     if(state.busy||state.repairing)return {label:'Syncing…',tone:'pending',detail:stage?stage+' · '+Math.floor((Date.now()-stageAt)/1000)+'s'+(Date.now()-stageAt>90000?' — slow or stalled':''):'Preparing reconciliation'};
     if(state.error)return {label:'Sync needs attention',tone:'error',detail:state.error};
     if(!state.connected)return {label:'Connect sync',tone:'idle',detail:'Connect once to automatically protect and synchronise your appliances, pictures and receipts.'};
+    if(failedHistory.size)return {label:'Sync needs attention',tone:'error',detail:'Newest records checked; '+failedHistory.size+' historical archive(s) could not be merged. Originals retained; see Sync diagnostics.'};
     if(state.lockedArchiveIds.size)return {label:'Sync needs attention',tone:'error',detail:'Current cloud data can sync, but older encrypted history could not be unlocked with this passphrase. All historical copies remain preserved.'};
     if(state.busy||state.repairing||state.needsSync||missing||!state.verified||state.cachedCloudId!==state.lastBackupId){
       return {label:missing?'Repairing photos…':'Syncing…',tone:'pending',detail:missing?'Checking encrypted cloud history for '+missing+' missing original file(s).':'Checking that every local file and the newest encrypted cloud copy are in sync.'};
@@ -108,15 +110,16 @@ window.WarrantyCloud=(()=>{
     let auth={};
     if(state.method==='passkey'){
       if(!state.passkeyClient)throw Error('App Monitor passkey session is not available. Connect again.');
-      mark("Validating passkey session");const session=await state.passkeyClient.validateSession();
+      if(!validatedAt||Date.now()-validatedAt>60000){mark("Validating passkey session");const session=await state.passkeyClient.validateSession();
       if(session?.method!=='passkey'){
         state.connected=false;state.method='';
         throw Error('Passkey session expired. Unlock again to resume automatic sync.');
       }
+      validatedAt=Date.now();}
       auth=state.passkeyClient.authHeaders();
     }else if(state.method==='firebase')auth={Authorization:`Bearer ${await requestFirebaseToken()}`};
     else throw Error('Connect to encrypted cloud backup first.');
-    mark('Cloud request: '+(options.method||'GET')+' '+(url===API+'/backups'?'archive list':'encrypted resource'));return fetch(url,{...options,headers:{...(options.headers||{}),...auth},cache:'no-store'});
+    mark('Cloud request: '+(options.method||'GET')+' '+(url===API+'/backups'?'archive list':'encrypted resource'));const response=await fetch(url,{...options,...(!options.signal&&typeof AbortSignal!=='undefined'&&AbortSignal.timeout?{signal:AbortSignal.timeout(90000)}:{}),headers:{...(options.headers||{}),...auth},cache:'no-store'});if(response.status===401||response.status===403)validatedAt=0;return response;
   }
 
   // A trusted-device convenience: credentials are encrypted with a non-extractable
@@ -221,6 +224,7 @@ window.WarrantyCloud=(()=>{
     }finally{state.busy=false;redraw();}
   }
   function disconnect({quiet=false,forget=true}={}){
+    validatedAt=0;failedHistory.clear();
     if(state.autoTimer)clearTimeout(state.autoTimer);
     if(state.retryTimer)clearTimeout(state.retryTimer);
     if(state.checkpointTimer)clearTimeout(state.checkpointTimer);
@@ -431,6 +435,7 @@ window.WarrantyCloud=(()=>{
           mark("Decrypting newest archive");latestZip=await decryptBackupBlob(latestEncrypted,state.passphrase);
         }
         async function mergeOlder(remote){
+          if(failedHistory.has(remote.id))return;
           try{
             mark("Downloading historical archive");const encrypted=await getEncrypted(remote.id);
             mark("Decrypting historical archive");const zip=await decryptBackupBlob(encrypted,state.passphrase);
@@ -439,16 +444,12 @@ window.WarrantyCloud=(()=>{
             processed.add(remote.id);
             if(state.lockedArchiveIds.delete(remote.id))historyChanged=true;
           }catch(error){
-            if(error?.code!=='WE_ARCHIVE_UNLOCK')throw error;
+            mark('Historical merge failed: '+safeError(error));
+            failedHistory.add(remote.id);processed.add(remote.id);
             // Older versions remain immutable in Cloudflare. Do not delete or
             // rewrite them, or block the latest healthy cloud state.
             if(!state.lockedArchiveIds.has(remote.id)){state.lockedArchiveIds.add(remote.id);historyChanged=true;}
           }
-        }
-        for(const remote of pending){
-          if(editing()){state.resyncWanted=true;return;}
-          if(remote.id===remoteLatest?.id)continue;
-          await mergeOlder(remote);
         }
         if(latestZip){
           mark("Merging newest archive");if(await applyRestoredZip(latestZip,{automatic:true})!==true)throw Error('Latest cloud reconciliation was interrupted.');
@@ -456,6 +457,11 @@ window.WarrantyCloud=(()=>{
           processed.add(remoteLatest.id);
           mark("Caching newest archive locally");await cacheLatestCloud(remoteLatest.id,latestEncrypted,remoteLatest.created);
           if(state.lockedArchiveIds.delete(remoteLatest.id))historyChanged=true;
+        }
+        for(const remote of pending){
+          if(editing()){state.resyncWanted=true;return;}
+          if(remote.id===remoteLatest?.id)continue;
+          await mergeOlder(remote);
         }
         // Recover missing originals from other immutable versions. A locked
         // historic archive is noted, not silently erased or treated as empty.
@@ -486,14 +492,14 @@ window.WarrantyCloud=(()=>{
           state.needsSync=true;
           await persistQueue();
         }
-        if(state.needsSync||force&&!remoteLatest&&localCount())await uploadCurrent();
+        if(!failedHistory.size&&(state.needsSync||force&&!remoteLatest&&localCount()))await uploadCurrent();
         await inspectLocalOriginals();
         state.initialReconciled=true;
         if(missingOriginals().length)throw Error('Local originals changed during sync. Cloud repair will retry.');
         if(state.lastBackupId&&state.cachedCloudId!==state.lastBackupId)throw Error('Latest encrypted cloud copy is not safely cached on this device.');
-        state.error='';state.pendingRestore=false;state.retryDelay=5000;state.unlockNeeded=false;state.verified=true;mark('Sync completed');
+        state.error='';state.pendingRestore=false;state.retryDelay=5000;state.unlockNeeded=false;state.verified=!failedHistory.size;mark('Sync completed');
       }catch(error){
-        mark('Sync failed: '+(['OperationError','NotFoundError','NotReadableError','AbortError','TimeoutError','QuotaExceededError','TypeError'].includes(error?.name)?error.name:'Error'));state.verified=false;
+        mark('Sync failed: '+safeError(error));state.verified=false;
         state.unlockNeeded=error?.code==='WE_ARCHIVE_UNLOCK';
         state.error=error?.name==='OperationError'
           ?'A browser encryption operation failed. Your local originals and encrypted cloud copies were kept; reopen the app and try again.'
