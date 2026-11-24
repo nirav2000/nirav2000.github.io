@@ -54,7 +54,7 @@ window.WarrantyCloud=(()=>{
   const trace=[];let stage='',stageAt=0,validatedAt=0;const failedHistory=new Set();
   function safeError(e){const m=String(e?.message||'');return /original photo\/file\(s\) remain unavailable|Local originals changed/i.test(m)?'ORIGINALS_UNREADABLE':/not safely cached|cached safely/i.test(m)?'CACHE_WRITE_FAILED':e?.code==='WE_ARCHIVE_UNLOCK'?'ARCHIVE_UNLOCK':/different website-login vault keys/i.test(m)?'VAULT_KEY_CONFLICT':/Missing file:/i.test(m)?'ARCHIVE_FILE_MISSING':/manifest/i.test(m)?'MANIFEST_INVALID':/deletion history/i.test(m)?'DELETION_HISTORY_INVALID':/Invalid record/i.test(m)?'RECORD_INVALID':/Invalid encrypted login|Incomplete account vault/i.test(m)?'VAULT_INVALID':/interrupted/i.test(m)?'MERGE_INTERRUPTED':['OperationError','NotFoundError','NotReadableError','AbortError','TimeoutError','QuotaExceededError','TypeError','DataError','InvalidStateError'].includes(e?.name)?e.name:'UNKNOWN_ERROR';}
   function mark(label){stage=label;stageAt=Date.now();trace.push(new Date().toISOString()+' '+label);if(trace.length>120)trace.shift();tick();}
-  function report(){return ['Warranty Ease sync diagnostics v0.9.7','Online: '+navigator.onLine,'Connected: '+state.connected,'Verified: '+state.verified,'Pending edits: '+state.needsSync,'Local records: '+localCount(),'Missing originals: '+missingOriginals().length,'Cloud archives: '+state.backups.length,'Stage: '+stage,'Stage seconds: '+(stageAt?Math.floor((Date.now()-stageAt)/1000):0),'---',...trace].join('\n');}
+  function report(){return ['Recovery paused: '+recoveryPaused,'Warranty Ease sync diagnostics v0.9.8','Online: '+navigator.onLine,'Connected: '+state.connected,'Verified: '+state.verified,'Pending edits: '+state.needsSync,'Local records: '+localCount(),'Missing originals: '+missingOriginals().length,'Cloud archives: '+state.backups.length,'Stage: '+stage,'Stage seconds: '+(stageAt?Math.floor((Date.now()-stageAt)/1000):0),'---',...trace].join('\n');}
   function tick(){const p=document.getElementById('sync-debug-report');if(p)p.textContent=report();const q=document.querySelector?.('#cloud-ui .cloud-status');if(q&&state.busy){const x=indication();q.textContent=x.label+' · '+x.detail;}}
   if(typeof setInterval==='function')setInterval(tick,1000);
   async function copyReport(){try{await navigator.clipboard.writeText(report());toast('Diagnostic report copied');}catch{toast('Select and copy the diagnostic text below.');}}
@@ -393,7 +393,10 @@ window.WarrantyCloud=(()=>{
       return id;
     }finally{state.uploading=false}
   }
+  let recoveryPaused=false;const archiveMemory=new Map();
   function planRetry(){
+    recoveryPaused=true;return;
+
     if(state.retryTimer)clearTimeout(state.retryTimer);
     if(!state.connected||!state.passphrase||!navigator.onLine||state.unlockNeeded)return;
     const wait=state.retryDelay;state.retryDelay=Math.min(wait*2,300000);
@@ -405,6 +408,8 @@ window.WarrantyCloud=(()=>{
     }));
   }
   async function syncNow({force=false}={}){
+    if(recoveryPaused&&!force)return;
+    if(force)recoveryPaused=false;
     if(state.syncPromise){if(state.needsSync)state.resyncWanted=true;return state.syncPromise;}
     if(!state.connected||!state.passphrase)throw Error('Connect once to enable automatic cloud synchronisation.');
     if(!navigator.onLine){state.verified=false;redraw();return;}
@@ -499,7 +504,7 @@ window.WarrantyCloud=(()=>{
         if(state.lastBackupId&&state.cachedCloudId!==state.lastBackupId)throw Error('Latest encrypted cloud copy is not safely cached on this device.');
         state.error='';state.pendingRestore=false;state.retryDelay=5000;state.unlockNeeded=false;state.verified=!failedHistory.size;mark('Sync completed');
       }catch(error){
-        mark('Sync failed: '+safeError(error));state.verified=false;
+        recoveryPaused=true;state.resyncWanted=false;mark('Sync failed: '+(/database connection is closing/i.test(String(error?.message))?'DATABASE_CLOSING':safeError(error)));state.verified=false;
         state.unlockNeeded=error?.code==='WE_ARCHIVE_UNLOCK';
         state.error=error?.name==='OperationError'
           ?'A browser encryption operation failed. Your local originals and encrypted cloud copies were kept; reopen the app and try again.'
@@ -546,7 +551,9 @@ window.WarrantyCloud=(()=>{
     if(!/^[A-Za-z0-9_-]{5,80}$/.test(id))throw Error('Invalid cloud archive identifier.');
      const transfer=window.WarrantyCloudChunks;
      if(!transfer)throw Error('The encrypted cloud restore module is not installed. Reload the app.');
-     return transfer.download(id,{send:(path,options)=>authorised(API+path,options),onProgress:({part,total})=>{mark('Received encrypted part '+part+' of '+total)}});
+     if(archiveMemory.has(id)){mark('Reusing downloaded archive');return archiveMemory.get(id);}
+     const cache=await caches.open('we-private-encrypted-recovery-v1');const key=new Request(new URL('./encrypted-recovery/'+id,location.href));const saved=await cache.match(key);if(saved){const blob=await saved.blob();archiveMemory.set(id,blob);mark('Reusing cached encrypted archive');return blob;}
+     const blob=await transfer.download(id,{send:(path,options)=>authorised(API+path,options),onProgress:({part,total})=>{mark('Received encrypted part '+part+' of '+total)}});archiveMemory.set(id,blob);try{await cache.put(key,new Response(blob));}catch{}return blob;
   }
   async function restore(id){
     if(!state.passphrase)throw Error('Enter the cloud encryption passphrase first.');
@@ -592,6 +599,7 @@ window.WarrantyCloud=(()=>{
     redraw();
   }
   function handle(action,id){
+    if(action==='cloud-resume-recovery'){void syncNow({force:true}).catch(()=>{});return true;}
     if(action==='cloud-copy-debug'){void copyReport();return true;}
     const invoke={'cloud-passkey':passkeyLogin,'cloud-login':firebaseLogin,'cloud-unlock':unlock,'cloud-logout':disconnect}[action];
     if(!invoke)return false;
