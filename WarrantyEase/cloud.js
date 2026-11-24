@@ -169,15 +169,16 @@ window.WarrantyCloud=(()=>{
   }
   async function localSnapshot({migrating=false}={}){
     await ensureStorage();
-    const [rows,accounts,metadata]=await new Promise((resolve,reject)=>{
+    const [rows,accounts,baseRows,vault,tombstoneRow]=await new Promise((resolve,reject)=>{
       const tx=db.transaction([DB_STORE,ACCOUNTS_STORE,META_STORE],'readonly');
-      const requests=[DB_STORE,ACCOUNTS_STORE,META_STORE].map(name=>tx.objectStore(name).getAll());
+      const meta=tx.objectStore(META_STORE);
+      const requests=[tx.objectStore(DB_STORE).getAll(),tx.objectStore(ACCOUNTS_STORE).getAll(),
+        meta.getAll(IDBKeyRange.bound('weSyncBase:','weSyncBase;',false,true)),meta.get('vault'),meta.get('syncTombstones')];
       tx.oncomplete=()=>resolve(requests.map(r=>r.result));
       tx.onabort=()=>reject(tx.error||Error('Local sync read interrupted.'));
     });
     const records=new Map(),raw=new Map(),bases=new Map(),unresolved=new Map();
-    const meta=new Map(metadata.map(row=>[row.id,row]));
-    for(const item of metadata)if(item.id.startsWith('weSyncBase:'))bases.set(item.id.slice(11),item);
+    for(const item of baseRows)bases.set(item.record.id,item);
     const add=(kind,value,original)=>{
       const id=recordId(kind,value.id);raw.set(id,original);
       records.set(id,{id,version:2,kind,deleted:false,value});
@@ -196,7 +197,7 @@ window.WarrantyCloud=(()=>{
           }
           if(!hashValid(ref[field]))delete ref[field];
         }
-        if(!ref.originalHash||migrating&&!await hasLocalBlob(ref.originalHash)){
+        if(!ref.originalHash||migrating&&!await hasStoredEvidence(ref.originalHash)){
           unresolved.set(row.id,[...(unresolved.get(row.id)||[]),file.id]);
         }
         value.files.push(ref);
@@ -205,9 +206,9 @@ window.WarrantyCloud=(()=>{
       add('appliance',value,row);
     }
     for(const row of accounts)add('account',row,row);
-    if(meta.has('vault'))add('vault',meta.get('vault'),meta.get('vault'));
+    if(vault)add('vault',vault,vault);
     const tombstones=new Map();
-    for(const item of meta.get('syncTombstones')?.items||[]){
+    for(const item of tombstoneRow?.items||[]){
       const id=recordId(item.kind,item.id),live=records.get(id);
       tombstones.set(id,item.deletedAt);
       if(!live||item.deletedAt>=(live.value.updatedAt||'')){
@@ -244,11 +245,8 @@ window.WarrantyCloud=(()=>{
       tx.onabort=()=>reject(tx.error||Error('Local sync write interrupted.'));
     });
   }
-  async function hasLocalBlob(hash){
-    return Boolean(await (await evidenceCache()).match(evidenceURL(hash)));
-  }
   async function localBlob(hash){
-    const cache=await evidenceCache(),response=await cache.match(evidenceURL(hash));
+    const response=await evidenceResponse(hash);
     if(!response)return null;
     try{
       const blob=await response.blob();
@@ -260,13 +258,6 @@ window.WarrantyCloud=(()=>{
       return null;
     }
   }
-  async function saveBlob(hash,blob){
-    const digest=await window.WarrantyCloudChunks.digest(await blob.arrayBuffer());
-    if(digest!==hash)throw Error('Downloaded attachment failed its integrity check.');
-    const cache=await evidenceCache();
-    await cache.put(evidenceURL(hash),new Response(blob));
-  }
-
   async function archives({all=false}={}){
     const items=[];let offset=0;
     do{
@@ -371,8 +362,8 @@ window.WarrantyCloud=(()=>{
         if(migration)state.refreshNeeded=true;
         const ok=await reconcile({
           send:(path,options)=>authorised(V2+path,options),localRecords:snapshot.records,bases:snapshot.bases,
-          localBlob,hasLocalBlob,
-          async saveBlob(hash,blob){await saveBlob(hash,blob);state.refreshNeeded=true;},
+          localBlob,hasLocalBlob:hasStoredEvidence,
+          async saveBlob(hash,blob){await saveEvidence(blob,hash);state.refreshNeeded=true;},
           async commit(id,record,etag){
             if(!await commitLocal(snapshot,id,record,etag,active))return false;
             if(!same(snapshot.records.get(id),record))state.refreshNeeded=true;

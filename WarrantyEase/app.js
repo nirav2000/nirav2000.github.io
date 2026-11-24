@@ -159,17 +159,41 @@ async function prepareDisplayImages(recordId,files){
  }
 }
 
-// Persist evidence as inline ArrayBuffers, hydrate fresh Blobs only in memory.
-// Store large evidence separately from IndexedDB metadata, keyed by content.
+// Originals are stored separately by content hash. Some WebKit sessions
+// acknowledge Cache Storage writes without being able to read them back.
+const evidenceFallbackKey=hash=>'weEvidence:'+hash;
 async function evidenceCache(){return caches.open('we-local-evidence-v1');}
 function evidenceURL(hash){return new URL('./local-evidence/'+hash,location.href).href;}
-async function saveEvidence(blob){
- const bytes=await blob.arrayBuffer(),digest=await crypto.subtle.digest('SHA-256',bytes);
- const hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
- const cache=await evidenceCache(),key=evidenceURL(hash);
- if(!await cache.match(key))await cache.put(key,new Response(bytes,{headers:{'Content-Type':blob.type||'application/octet-stream'}}));
- const saved=await cache.match(key);if(!saved)throw Error('EVIDENCE_CACHE_WRITE_FAILED');
- const check=await saved.arrayBuffer();const checkHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',check)),b=>b.toString(16).padStart(2,'0')).join('');if(checkHash!==hash||check.byteLength!==bytes.byteLength)throw Error('EVIDENCE_CACHE_LENGTH_MISMATCH');
+async function cachedEvidence(hash){
+ try{return await (await evidenceCache()).match(evidenceURL(hash));}catch{return null;}
+}
+async function evidenceResponse(hash){
+ const cached=await cachedEvidence(hash);
+ if(cached)return cached;
+ const saved=await storeAction(META_STORE,'readonly',store=>store.get(evidenceFallbackKey(hash)));
+ return saved?.bytes instanceof ArrayBuffer?new Response(saved.bytes,{headers:{'Content-Type':saved.mime}}):null;
+}
+async function hasStoredEvidence(hash){
+ return Boolean(await cachedEvidence(hash)||
+  await storeAction(META_STORE,'readonly',store=>store.getKey(evidenceFallbackKey(hash))));
+}
+async function saveEvidence(blob,expectedHash){
+ const bytes=await blob.arrayBuffer(),digest=window.WarrantyCloudChunks.digest;
+ const hash=await digest(bytes),mime=blob.type||'application/octet-stream';
+ if(expectedHash&&hash!==expectedHash)throw Error('Downloaded attachment failed its integrity check.');
+ const verified=async buffer=>buffer?.byteLength===bytes.byteLength&&await digest(buffer)===hash;
+ try{
+  const cache=await evidenceCache(),key=evidenceURL(hash);
+  const current=await cache.match(key);
+  if(current&&await verified(await current.arrayBuffer()))return hash;
+  await cache.put(key,new Response(bytes,{headers:{'Content-Type':mime}}));
+  const written=await cache.match(key);
+  if(written&&await verified(await written.arrayBuffer()))return hash;
+ }catch(error){console.warn('Attachment cache unavailable:',error?.name||'Error');}
+ const id=evidenceFallbackKey(hash);
+ await storeAction(META_STORE,'readwrite',store=>store.put({id,mime,bytes}));
+ const written=await storeAction(META_STORE,'readonly',store=>store.get(id));
+ if(!await verified(written?.bytes))throw Error('EVIDENCE_STORAGE_WRITE_FAILED');
  return hash;
 }
 async function evidenceForStorage(row){
@@ -187,11 +211,10 @@ async function evidenceForStorage(row){
  return {...row,files};
 }
 async function hydrateEvidence(row){
- const cache=await evidenceCache();
  return {...row,files:await Promise.all((row.files||[]).map(async f=>{
   const out={...f};
   for(const [blobKey,bytesKey,hashKey] of [['blob','originalBytes','originalHash'],['previewBlob','previewBytes','previewHash']]){
-   if(f[hashKey]){const response=await cache.match(evidenceURL(f[hashKey]));if(response)out[blobKey]=new Blob([await response.arrayBuffer()],{type:blobKey==='blob'?f.mime||'application/octet-stream':'image/jpeg'});}
+   if(f[hashKey]){const response=await evidenceResponse(f[hashKey]);if(response)out[blobKey]=new Blob([await response.arrayBuffer()],{type:blobKey==='blob'?f.mime||'application/octet-stream':'image/jpeg'});}
    if(!out[blobKey]&&f[bytesKey] instanceof ArrayBuffer)out[blobKey]=new Blob([f[bytesKey]],{type:blobKey==='blob'?f.mime||'application/octet-stream':'image/jpeg'});
    delete out[bytesKey];
   }
