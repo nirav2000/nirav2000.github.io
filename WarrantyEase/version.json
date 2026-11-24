@@ -1,6 +1,5 @@
 {
-  "version": "0.9.3",
-  "release": "visible-version-and-preview-repair",
-  "dataPublished": false,
-  "sourceSha": "1c803cc2e5a142042c483ffc489ae0b9f961af74"
+  "version": "0.9.4",
+  "release": "sync-diagnostics",
+  "dataPublished": false
 }
