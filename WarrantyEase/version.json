@@ -1,5 +1,6 @@
 {
-  "version": "0.9.16",
-  "release": "binary-sync-and-connection-verification",
-  "dataPublished": false
+  "version": "0.9.17",
+  "release": "appliance-home-views",
+  "dataPublished": false,
+  "sourceSha": "001a29be87fbb89b95eb2bc62971a61bafd2dc04"
 }

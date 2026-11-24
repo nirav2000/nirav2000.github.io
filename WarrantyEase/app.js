@@ -222,14 +222,38 @@ function getRecord(id) {return appliances.find(r=>r.id===id);}
 function setNavState() {
  document.querySelectorAll('[data-action="home"], [data-action="notes"], [data-action="settings"], [data-action="logins"]').forEach(el=>el.classList.toggle('active',el.dataset.action===currentView));
 }
+const homeLayouts = {current:'Current', wallet:'Wallet', catalogue:'Catalogue', reminders:'Reminders'};
+const layoutKey = 'warrantyEase.homeLayout';
+let homeLayout = 'current', featuredId = '';
+try {
+ const saved = localStorage.getItem(layoutKey);
+ if (Object.hasOwn(homeLayouts, saved)) homeLayout = saved;
+} catch {}
+
+document.addEventListener('change', event => {
+ if (event.target.id !== 'home-layout' || !Object.hasOwn(homeLayouts, event.target.value)) return;
+ homeLayout = event.target.value;
+ try { localStorage.setItem(layoutKey, homeLayout); } catch {}
+ renderHome();
+ document.getElementById('home-layout')?.focus();
+});
+document.addEventListener('click', event => {
+ const tab = event.target.closest('[data-feature-appliance]');
+ if (!tab) return;
+ featuredId = tab.dataset.featureAppliance;
+ renderGrid();
+ document.querySelector('#appliance-list .appliance-open')?.focus();
+});
+
 function renderHome() {
  currentView='home';setNavState();clearUrls('main');
  const covered=appliances.filter(isCovered).length;
  root.innerHTML=`
- <section class="home-head">
+ <section class="home-head" data-layout="${homeLayout}">
   <div class="eyebrow">Your home, organised</div>
-  <div class="home-title-row"><div><h1>Appliances<span class="title-dot">.</span></h1><p>Everything you need, when you need it.</p></div><button class="btn btn-dark home-add" data-action="new">${ico('camera')} Add appliance</button></div>
+  <div class="home-title-row"><div><h1>${homeLayout==='catalogue'?'My appliances':homeLayout==='reminders'?'Follow-ups':'Appliances'}${homeLayout==='current'?'<span class="title-dot">.</span>':''}</h1><p>Everything you need, when you need it.</p></div><button class="btn btn-dark home-add" data-action="new">${ico('camera')} Add appliance</button></div>
  </section>
+ <label class="home-layout-label">View <select id="home-layout">${Object.entries(homeLayouts).map(([value,label])=>`<option value="${value}" ${value===homeLayout?'selected':''}>${label}</option>`).join('')}</select></label>
  <div id="we-cloud-banner">${window.WarrantyCloud?.banner?.()||''}</div>
   <section class="home-utility"><div class="search-wrap home-search">${ico('search')}<input id="app-search" type="search" class="search-input" placeholder="Search appliances, models or serial numbers" aria-label="Search appliances" value="${esc(searchTerm)}"></div><div class="mini-count"><span class="count-big">${appliances.length}</span> saved <span class="count-sep">·</span> ${covered} with active cover dates</div></section>
  <section class="help-strip"><span class="help-icon">${ico('shield')}</span><div><strong>Need to make a warranty claim?</strong><p>Choose an appliance below to find your serial number, receipt and contact details.</p></div>${ico('arrow','help-arrow')}</section>
@@ -338,7 +362,15 @@ function renderGrid() {
  const filtered=appliances.filter(r=>[r.productName,r.brand,r.model,r.serial,r.retailer,r.category,...(r.files||[]).map(f=>f.ocrText||'')].join(' ').toLowerCase().includes(searchTerm.trim().toLowerCase()));
  if(!appliances.length){list.innerHTML=`<div class="empty-state compact-empty"><div class="empty-art">${ico('box')}</div><h3>No appliances yet</h3><p>Add an appliance to keep its receipt and warranty together.</p></div>`;return;}
  if(!filtered.length){list.innerHTML='<div class="no-results">No appliances match your search.</div>';return;}
- list.innerHTML=`<div class="appliance-grid">${filtered.map(r=>{
+ let shown = filtered, tabs = '';
+ if (homeLayout === 'wallet') {
+  const featured = filtered.find(record => record.id === featuredId) || filtered[0];
+  shown = [featured];
+  tabs = filtered.filter(record => record !== featured).map(record =>
+   `<button class="wallet-pass" data-feature-appliance="${esc(record.id)}">${esc([record.brand,record.productName || record.model].filter(Boolean).join(' ') || 'Appliance')}</button>`
+  ).join('');
+ }
+ list.innerHTML=`<div class="appliance-grid">${tabs}${shown.map(r=>{
   const photo=preferredPicture(r),blob=mediaBlob(photo);
   const name=(r.productName||'').trim(), brand=(r.brand||'').trim(), model=(r.model||'').trim();
   const generic=/^(washing machine|washer|fridge|fridge freezer|dishwasher|dryer|heat[- ]pump tumble dryer|tumble dryer|oven|tv|television)$/i.test(name);
