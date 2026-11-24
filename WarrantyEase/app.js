@@ -116,8 +116,11 @@ function toast(msg) {toastRoot.innerHTML=`<div class="toast">${esc(msg)}</div>`;
 function safeHttp(value) {if(!value)return '';try{const u=new URL(/^https?:\/\//i.test(value)?value:`https://${value}`);return /^(https?):$/.test(u.protocol)?u.href:'';}catch{return '';}}
 function safeEmail(value) {return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value||'')?value:'';}
 
-function openDB() {return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,3);request.onupgradeneeded=()=>{const database=request.result;for(const store of [DB_STORE,ACCOUNTS_STORE,META_STORE,DEVICE_BACKUPS_STORE])if(!database.objectStoreNames.contains(store))database.createObjectStore(store,{keyPath:'id'});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);request.onblocked=()=>reject(new Error('Storage upgrade is blocked by another tab'));});}
-function storeAction(storeName,mode,callback) {return new Promise((resolve,reject)=>{
+function openDB() {return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,3);request.onupgradeneeded=()=>{const database=request.result;for(const store of [DB_STORE,ACCOUNTS_STORE,META_STORE,DEVICE_BACKUPS_STORE])if(!database.objectStoreNames.contains(store))database.createObjectStore(store,{keyPath:'id'});};request.onsuccess=()=>{const connection=request.result;connection.onversionchange=()=>{connection.close();if(db===connection)db=null;};connection.onclose=()=>{if(db===connection)db=null;};resolve(connection);};request.onerror=()=>reject(request.error);request.onblocked=()=>reject(new Error('Storage upgrade is blocked by another tab'));});}
+let openingStorage=null;
+async function ensureStorage(){if(!db){openingStorage ||= openDB().finally(()=>{openingStorage=null});db=await openingStorage;}return db;}
+async function storeAction(storeName,mode,callback) {await ensureStorage();try{return await storageTransaction(storeName,mode,callback);}catch(e){if(e?.name!=='InvalidStateError')throw e;db=null;await ensureStorage();return storageTransaction(storeName,mode,callback);}}
+function storageTransaction(storeName,mode,callback) {return new Promise((resolve,reject)=>{
  if(!db?.objectStoreNames?.contains(storeName)){
   // A missing IndexedDB object store is a schema problem, not a lost R2
   // archive or a wrong encryption passphrase. Never reset the database here.
@@ -1076,9 +1079,10 @@ async function applyRestoredZip(zip,{automatic=false}={}){
  for(const a of incomingAccounts)if(!a.id||!a.secretBlob?.iv||!a.secretBlob?.ciphertext)throw new Error('Invalid encrypted login');
  if(!automatic&&!window.confirm('Restore '+restored.length+' appliance(s) and '+incomingAccounts.length+' encrypted website login(s)? Existing local evidence is kept.'))return false;
  const storedRestored=await Promise.all(restored.map(evidenceForStorage));
+ await ensureStorage();
  // All appliance records, vault entries and deletion history commit together.
  await new Promise((resolve,reject)=>{
-  const tx=db.transaction([DB_STORE,ACCOUNTS_STORE,META_STORE],'readwrite');
+  let tx;try{tx=db.transaction([DB_STORE,ACCOUNTS_STORE,META_STORE],'readwrite');}catch(e){if(e?.name==='InvalidStateError')db=null;reject(e);return;}
   const recordStore=tx.objectStore(DB_STORE),accountStore=tx.objectStore(ACCOUNTS_STORE),metaStore=tx.objectStore(META_STORE);
   try{
    for(const r of storedRestored)recordStore.put(r);
@@ -1376,7 +1380,7 @@ document.addEventListener('input',()=>touchVault());
    // devices and publish the display-safe copy encrypted with the original.
    for(const record of appliances){
      const need=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&f.blob instanceof Blob&&f.blob.size);
-     if(need.length)void prepareDisplayImages(record.id,need).catch(()=>{});
+     // Preview regeneration deferred until recovery is stable.
    }
    void window.WarrantyCloud?.start?.().catch(error=>console.warn('Cloud reconnect will retry:',error?.message||error));
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js',{scope:'/WarrantyEase/'}).catch(()=>{});
