@@ -140,7 +140,10 @@ function patchStoredFile(recordId,fileId,changes){return new Promise((resolve,re
  });}
 async function prepareDisplayImages(recordId,files){
  for(const f of files){
-  if(!f.mime.startsWith('image/')||window.WarrantyMedia?.isBlob?.(f.previewBlob)||!window.WarrantyMedia?.createPreview)continue;
+  if(!f.mime?.startsWith('image/')||!window.WarrantyMedia?.createPreview)continue;
+  if(window.WarrantyMedia?.isBlob?.(f.previewBlob)){
+   try{await f.previewBlob.arrayBuffer();continue;}catch(error){if(!['NotFoundError','NotReadableError'].includes(error?.name))throw error;}
+  }
   try{
    const preview=await window.WarrantyMedia.createPreview(f.blob,{type:f.type});if(!preview)continue;
    await patchStoredFile(recordId,f.id,{previewBlob:preview});
@@ -792,8 +795,15 @@ async function createRawBackupZip(){
     const {blob,previewBlob,...meta}=f;
     if(previewBlob instanceof Blob&&previewBlob.size&&previewBlob.type==='image/jpeg'){
       const previewPath=`previews/${r.id}/${f.id}.jpg`;
-      items.push({name:previewPath,data:previewBlob});
-      clone.files.push({...meta,path,previewPath});
+      // A derived preview must never prevent the original evidence from syncing.
+      try {
+        const bytes=await previewBlob.arrayBuffer();
+        items.push({name:previewPath,data:new Blob([bytes],{type:'image/jpeg'})});
+        clone.files.push({...meta,path,previewPath});
+      } catch(error) {
+        if(!['NotFoundError','NotReadableError'].includes(error?.name))throw error;
+        clone.files.push({...meta,path});
+      }
     }else clone.files.push({...meta,path});
    }
   manifest.records.push(clone);
@@ -953,6 +963,17 @@ async function mergeRestoredRecord(incoming,local){
       files.set(file.id,chosen);
     }
   }
+  // Prefer readable derived previews; originals remain authoritative.
+  for(const [id,originalFile] of files){
+    const file={...originalFile};files.set(id,file);
+    if(!(file.previewBlob instanceof Blob))continue;
+    try{await file.previewBlob.arrayBuffer();}catch(error){
+      if(!['NotFoundError','NotReadableError'].includes(error?.name))throw error;
+      const candidates=[...(incoming.files||[]),...(local.files||[])].filter(f=>f.id===id&&f.previewBlob instanceof Blob);
+      delete file.previewBlob;
+      for(const candidate of candidates){try{await candidate.previewBlob.arrayBuffer();file.previewBlob=candidate.previewBlob;break;}catch(e){if(!['NotFoundError','NotReadableError'].includes(e?.name))throw e;}}
+    }
+  }
   return {...merged,files:[...files.values()],
     followUps:window.WarrantyFollowUps?.merge?.(incoming.followUps,local.followUps)||[...(incoming.followUps||[]),...(local.followUps||[])]};
 }
@@ -1059,7 +1080,7 @@ async function applyRestoredZip(zip,{automatic=false}={}){
  });
  lockVault(true);await refresh();
  for(const record of restored){
-   const missingPreviews=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&f.blob instanceof Blob&&f.blob.size&&!(f.previewBlob instanceof Blob&&f.previewBlob.size));
+   const missingPreviews=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&f.blob instanceof Blob&&f.blob.size);
    if(missingPreviews.length)void prepareDisplayImages(record.id,missingPreviews).catch(()=>{});
  }
  if(!automatic){closeModal(true);renderHome();toast('Records restored to this device.');}
@@ -1328,7 +1349,7 @@ document.addEventListener('input',()=>touchVault());
    // Legacy snapshots do not carry JPEG thumbnails. Derive them on capable
    // devices and publish the display-safe copy encrypted with the original.
    for(const record of appliances){
-     const need=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&f.blob instanceof Blob&&f.blob.size&&!(f.previewBlob instanceof Blob&&f.previewBlob.size));
+     const need=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&f.blob instanceof Blob&&f.blob.size);
      if(need.length)void prepareDisplayImages(record.id,need).catch(()=>{});
    }
    void window.WarrantyCloud?.start?.().catch(error=>console.warn('Cloud reconnect will retry:',error?.message||error));
