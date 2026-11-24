@@ -135,11 +135,11 @@ function dbAction(mode,callback){return storeAction(DB_STORE,mode,callback);}
 // Read, merge, and write within ONE IndexedDB transaction to prevent OCR and
 // thumbnail generation from overwriting each other's changes.
 async function patchStoredFile(recordId,fileId,changes){
- const storedChanges={...changes};for(const [k,b] of [['blob','originalBytes'],['previewBlob','previewBytes']])if(changes[k] instanceof Blob){storedChanges[b]=await changes[k].arrayBuffer();delete storedChanges[k];}
+ const storedChanges={...changes};for(const [k,b] of [['blob','originalBytes'],['previewBlob','previewBytes']])if(changes[k] instanceof Blob){storedChanges[k==='blob'?'originalHash':'previewHash']=await saveEvidence(changes[k]);delete storedChanges[k];}
  return new Promise((resolve,reject)=>{
  const tx=db.transaction(DB_STORE,'readwrite'),store=tx.objectStore(DB_STORE),req=store.get(recordId);
  req.onsuccess=()=>{const row=req.result,attached=row?.files?.find(f=>f.id===fileId);
-  if(attached){Object.assign(attached,storedChanges);if(storedChanges.originalBytes)delete attached.blob;if(storedChanges.previewBytes)delete attached.previewBlob;if(Object.keys(changes).some(k=>k!=='previewBlob'))row.updatedAt=new Date().toISOString();store.put(row);}
+  if(attached){Object.assign(attached,storedChanges);if(storedChanges.originalHash){delete attached.blob;delete attached.originalBytes;}if(storedChanges.previewHash){delete attached.previewBlob;delete attached.previewBytes;}if(Object.keys(changes).some(k=>k!=='previewBlob'))row.updatedAt=new Date().toISOString();store.put(row);}
  };
  tx.oncomplete=()=>{if(Object.keys(changes).some(key=>key!=='previewBlob')||changes.previewBlob instanceof Blob)window.WarrantyCloud?.scheduleUpload?.();resolve(true)};tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Attachment update could not finish'));
  });}
@@ -160,29 +160,45 @@ async function prepareDisplayImages(recordId,files){
 }
 
 // Persist evidence as inline ArrayBuffers, hydrate fresh Blobs only in memory.
+// Store large evidence separately from IndexedDB metadata, keyed by content.
+async function evidenceCache(){return caches.open('we-local-evidence-v1');}
+function evidenceURL(hash){return new URL('./local-evidence/'+hash,location.href).href;}
+async function saveEvidence(blob){
+ const bytes=await blob.arrayBuffer(),digest=await crypto.subtle.digest('SHA-256',bytes);
+ const hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+ const cache=await evidenceCache(),key=evidenceURL(hash);
+ if(!await cache.match(key))await cache.put(key,new Response(bytes,{headers:{'Content-Type':blob.type||'application/octet-stream'}}));
+ const saved=await cache.match(key);if(!saved)throw Error('EVIDENCE_CACHE_WRITE_FAILED');
+ const check=await saved.arrayBuffer();if(check.byteLength!==bytes.byteLength)throw Error('EVIDENCE_CACHE_LENGTH_MISMATCH');
+ return hash;
+}
 async function evidenceForStorage(row){
  const files=[];
  for(const f of row.files||[]){
   const out={...f};
-  for(const [blobKey,bytesKey] of [['blob','originalBytes'],['previewBlob','previewBytes']]){
-   if(f[blobKey] instanceof Blob&&f[blobKey].size){
-    try{out[bytesKey]=await f[blobKey].arrayBuffer();delete out[blobKey];}
-    catch(e){if(out[bytesKey] instanceof ArrayBuffer&&out[bytesKey].byteLength)delete out[blobKey];else if(blobKey==='previewBlob')delete out[blobKey];}
+  for(const [blobKey,bytesKey,hashKey] of [['blob','originalBytes','originalHash'],['previewBlob','previewBytes','previewHash']]){
+   const blob=f[blobKey] instanceof Blob?f[blobKey]:f[bytesKey] instanceof ArrayBuffer?new Blob([f[bytesKey]]):null;
+   if(blob?.size){let readable;try{readable=await blob.arrayBuffer();}catch(e){if(blobKey==='previewBlob'){delete out[blobKey];delete out[bytesKey];}continue;}
+    out[hashKey]=await saveEvidence(new Blob([readable],{type:blob.type}));delete out[blobKey];delete out[bytesKey];
    }
   }
   files.push(out);
  }
  return {...row,files};
 }
-function hydrateEvidence(row){
- return {...row,files:(row.files||[]).map(f=>{
+async function hydrateEvidence(row){
+ const cache=await evidenceCache();
+ return {...row,files:await Promise.all((row.files||[]).map(async f=>{
   const out={...f};
-  if(f.originalBytes instanceof ArrayBuffer&&f.originalBytes.byteLength)out.blob=new Blob([f.originalBytes],{type:f.mime||'application/octet-stream'});
-  if(f.previewBytes instanceof ArrayBuffer&&f.previewBytes.byteLength)out.previewBlob=new Blob([f.previewBytes],{type:'image/jpeg'});
-  delete out.originalBytes;delete out.previewBytes;return out;
- })};
+  for(const [blobKey,bytesKey,hashKey] of [['blob','originalBytes','originalHash'],['previewBlob','previewBytes','previewHash']]){
+   if(f[hashKey]){const response=await cache.match(evidenceURL(f[hashKey]));if(response)out[blobKey]=new Blob([await response.arrayBuffer()],{type:blobKey==='blob'?f.mime||'application/octet-stream':'image/jpeg'});}
+   if(!out[blobKey]&&f[bytesKey] instanceof ArrayBuffer)out[blobKey]=new Blob([f[bytesKey]],{type:blobKey==='blob'?f.mime||'application/octet-stream':'image/jpeg'});
+   delete out[bytesKey];
+  }
+  return out;
+ }))};
 }
-async function refresh() {appliances=(await dbAction('readonly',store=>store.getAll())).map(hydrateEvidence);appliances.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));websiteAccounts=await storeAction(ACCOUNTS_STORE,'readonly',store=>store.getAll());websiteAccounts.sort((a,b)=>String(a.brand).localeCompare(String(b.brand)));vaultMeta=await storeAction(META_STORE,'readonly',store=>store.get('vault'))||null;const last=await storeAction(META_STORE,'readonly',store=>store.get('lastBackup'));lastBackupAt=last?.at||null;}
+async function refresh() {appliances=await Promise.all((await dbAction('readonly',store=>store.getAll())).map(hydrateEvidence));appliances.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));websiteAccounts=await storeAction(ACCOUNTS_STORE,'readonly',store=>store.getAll());websiteAccounts.sort((a,b)=>String(a.brand).localeCompare(String(b.brand)));vaultMeta=await storeAction(META_STORE,'readonly',store=>store.get('vault'))||null;const last=await storeAction(META_STORE,'readonly',store=>store.get('lastBackup'));lastBackupAt=last?.at||null;}
 async function putRecord(record) {record.updatedAt=new Date().toISOString();const stored=await evidenceForStorage(record);await dbAction('readwrite',store=>store.put(stored));await refresh();window.WarrantyCloud?.scheduleUpload?.();}
 // A tombstone travels in encrypted backups, preventing an older device from reviving deleted entries.
 async function deleteWithTombstone(storeName,id,kind){
@@ -1078,7 +1094,7 @@ async function applyRestoredZip(zip,{automatic=false}={}){
  }
  for(const a of incomingAccounts)if(!a.id||!a.secretBlob?.iv||!a.secretBlob?.ciphertext)throw new Error('Invalid encrypted login');
  if(!automatic&&!window.confirm('Restore '+restored.length+' appliance(s) and '+incomingAccounts.length+' encrypted website login(s)? Existing local evidence is kept.'))return false;
- const storedRestored=await Promise.all(restored.map(evidenceForStorage));
+ const storedRestored=[];for(const row of restored)storedRestored.push(await evidenceForStorage(row));
  await ensureStorage();
  // All appliance records, vault entries and deletion history commit together.
  await new Promise((resolve,reject)=>{
@@ -1106,7 +1122,7 @@ async function applyRestoredZip(zip,{automatic=false}={}){
    metaStore.put({id:'syncTombstones',items:[...deleted.values()]});
    if(incomingVault&&(!vaultMeta||!websiteAccounts.length))metaStore.put(incomingVault);
   }catch(error){try{tx.abort()}catch{}reject(error);return}
-  tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Restore was interrupted'));
+  tx.oncomplete=resolve;tx.onerror=()=>reject(new Error('RESTORE_METADATA_TRANSACTION: '+(tx.error?.name||'UnknownError')));tx.onabort=()=>reject(new Error('RESTORE_METADATA_ABORT: '+(tx.error?.name||'UnknownError')));
  });
  lockVault(true);await refresh();
  for(const record of restored){
