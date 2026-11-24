@@ -1,8 +1,8 @@
 /* Warranty Ease scoped offline shell; adapted from shared Apps PWA v1 conventions. */
-const CACHE='warranty-ease-v9-11';
+const CACHE='warranty-ease-v9-12';
 const PREFIX='warranty-ease-v';
 const OCR_CACHE='warranty-ease-ocr-v7';
-const ASSETS=['./','./index.html','./release-check.js?v=0.9.11','./style.css?v=0.9.11','./improvements.css?v=0.9.11','./media.css?v=0.9.11','./followups.css?v=0.9.11','./wallet.css?v=0.9.11','./followups.js?v=0.9.11','./followups-ui.js?v=0.9.11','./media.js?v=0.9.11','./resources.js?v=0.9.11','./cloud-chunks.js?v=0.9.11','./app.js?v=0.9.11','./platform.js?v=0.9.11','./apps-manifest.json','./cloud.js?v=0.9.11','./boot.mjs?v=0.9.11','./ocr-control.js?v=0.9.11','./ocr-extract.js?v=0.9.11','./ocr-crop.js?v=0.9.11','./ocr-runner.js?v=0.9.11','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
+const ASSETS=['./','./index.html','./release-check.js?v=0.9.12','./style.css?v=0.9.12','./improvements.css?v=0.9.12','./media.css?v=0.9.12','./followups.css?v=0.9.12','./wallet.css?v=0.9.12','./followups.js?v=0.9.12','./followups-ui.js?v=0.9.12','./media.js?v=0.9.12','./resources.js?v=0.9.12','./cloud-chunks.js?v=0.9.12','./app.js?v=0.9.12','./platform.js?v=0.9.12','./apps-manifest.json','./cloud.js?v=0.9.12','./boot.mjs?v=0.9.12','./ocr-control.js?v=0.9.12','./ocr-extract.js?v=0.9.12','./ocr-crop.js?v=0.9.12','./ocr-runner.js?v=0.9.12','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await cache.addAll(ASSETS.map(url=>new Request(url,{cache:'reload'})));await self.skipWaiting();})());});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith(PREFIX)&&k!==CACHE&&k!==OCR_CACHE).map(k=>caches.delete(k)));await self.clients.claim();})());});
 self.addEventListener('fetch',event=>{
