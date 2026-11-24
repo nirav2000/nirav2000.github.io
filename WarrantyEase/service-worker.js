@@ -1,16 +1,16 @@
 /* Warranty Ease scoped offline shell; adapted from shared Apps PWA v1 conventions. */
-const CACHE='warranty-ease-v9-6';
+const CACHE='warranty-ease-v9-7';
 const PREFIX='warranty-ease-v';
 const OCR_CACHE='warranty-ease-ocr-v7';
-const ASSETS=['./','./index.html','./style.css','./improvements.css','./media.css','./followups.css','./wallet.css','./followups.js','./followups-ui.js','./media.js','./resources.js','./cloud-chunks.js','./app.js?v=0.9.6','./platform.js','./apps-manifest.json','./cloud.js?v=0.9.6','./boot.mjs','./ocr-control.js','./ocr-extract.js','./ocr-crop.js','./ocr-runner.js','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
-self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await cache.addAll(ASSETS);await self.skipWaiting();})());});
+const ASSETS=['./','./index.html','./release-check.js?v=0.9.7','./style.css?v=0.9.7','./improvements.css?v=0.9.7','./media.css?v=0.9.7','./followups.css?v=0.9.7','./wallet.css?v=0.9.7','./followups.js?v=0.9.7','./followups-ui.js?v=0.9.7','./media.js?v=0.9.7','./resources.js?v=0.9.7','./cloud-chunks.js?v=0.9.7','./app.js?v=0.9.7','./platform.js?v=0.9.7','./apps-manifest.json','./cloud.js?v=0.9.7','./boot.mjs?v=0.9.7','./ocr-control.js?v=0.9.7','./ocr-extract.js?v=0.9.7','./ocr-crop.js?v=0.9.7','./ocr-runner.js?v=0.9.7','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
+self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await cache.addAll(ASSETS.map(url=>new Request(url,{cache:'reload'})));await self.skipWaiting();})());});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith(PREFIX)&&k!==CACHE&&k!==OCR_CACHE).map(k=>caches.delete(k)));await self.clients.claim();})());});
 self.addEventListener('fetch',event=>{
  const request=event.request,url=new URL(request.url);
  if(request.method!=='GET'||url.origin!==self.location.origin||!url.pathname.startsWith('/WarrantyEase/'))return;
  event.respondWith((async()=>{const cache=await caches.open(url.pathname.startsWith('/WarrantyEase/ocr/')?OCR_CACHE:CACHE);
-  if(request.mode==='navigate'||url.pathname.endsWith('/version.json')){
-   try{const online=await fetch(request,{cache:'no-store'});if(online.ok)await cache.put(request,online.clone());return online}catch{return await cache.match(request)||await cache.match('./index.html')||Response.error()}
+  if(request.mode==='navigate'||url.pathname.endsWith('/version.json')||url.pathname.endsWith('/release-integrity.json')){
+   try{const online=await fetch(request,{cache:'no-store'});if(online.ok)await cache.put(request,online.clone());return online}catch{return await cache.match(request)||(request.mode==='navigate'?await cache.match('./index.html'):null)||Response.error()}
   }
   const cached=await cache.match(request);if(cached)return cached;
   try{const response=await fetch(request);if(response.ok)await cache.put(request,response.clone());return response}catch{return Response.error()}
