@@ -358,7 +358,7 @@ function renderSettings() {
   root.innerHTML=`<div class="settings-top"><div><div class="eyebrow"><span class="eyebrow-dot"></span> Private, automatic and available offline</div><h1>Sync &amp; privacy.</h1><p>Your appliances, photos, receipts and notes stay on this device and automatically reconcile with your encrypted cloud copy.</p></div>${ico('lock','welcome-doodle')}</div>
   <div id="cloud-ui">${window.WarrantyCloud?.panel?.()||''}</div>
   <div class="settings-grid">
-   <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Available on this device</h3><p>Original pictures and documents are kept locally. The newest verified encrypted cloud copy is also saved on this device for automatic repair when needed.</p><p class="note-muted" id="storage-info">Checking device storage...</p><p class="we-storage-audit" id="we-storage-audit" role="status">Checking photos...</p></section>
+   <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Available on this device</h3><p>Original pictures and documents are kept locally. The newest verified encrypted cloud copy is also saved on this device for automatic repair when needed.</p><button class="btn btn-line" data-action="device-export">Download device data</button><button class="btn btn-line" data-action="device-import">Import recovered ZIP</button><input type="file" id="device-import-file" accept=".zip,application/zip" hidden><p class="note-muted" id="device-recovery-status" role="status"></p><p class="note-muted" id="storage-info">Checking device storage...</p><p class="we-storage-audit" id="we-storage-audit" role="status">Checking photos...</p></section>
    <section class="settings-card"><div class="settings-icon">${ico('key')}</div><h3>Website logins</h3><p>Website credentials remain encrypted separately from warranty documents.</p><button class="btn btn-line" data-action="logins">${ico('lock')} Manage website logins</button></section>
    <section class="settings-card"><div class="settings-icon">${ico('camera')}</div><h3>Photo text recognition</h3><p>Read model labels and receipts on this device. Your original image remains unaltered.</p><button class="btn btn-line btn-sm" data-action="ocr-offline-prepare">Prepare scanner for offline use</button><p class="note-muted" id="ocr-offline-status">The scanner works without internet once its assets are cached.</p></section>
    <section class="settings-card"><div class="settings-icon">${ico('shield')}</div><h3>How sync protects your records</h3><p>Changes are saved locally first and encrypted before they reach Cloudflare. Each device automatically checks for missing originals and reconciles records. Historical encrypted cloud copies are retained privately for recovery, without a backup manager or manual restore steps.</p><p class="note-muted">Sync runs while Warranty Ease is open and online. iOS may pause closed apps. Do not erase device storage while an issue is being repaired.</p></section>
@@ -827,18 +827,21 @@ const RECOVERY_HTML="<!doctype html>\n<html lang=\"en-GB\"><head><meta charset=\
 // records. It does not depend on the original hosting, server or library CDN.
 const BACKUP_MAGIC='WEASE02!';
 const ARCHIVE_HELP=`WARRANTY EASE - OFFLINE ARCHIVE\n\n1. Extract the files inside this ZIP.\n2. Open RECOVER.html in a modern browser.\n3. Choose backup.encrypted and enter your archive passphrase.\n4. Open the resulting ordinary ZIP: APPLIANCE-INDEX.txt lists your devices and the files folder contains the original evidence.\n5. Website passwords inside the restored records remain encrypted by your separate website vault passphrase.\n\nThe RECOVER.html file works without Warranty Ease's website or any cloud login.\nNo data is uploaded while decrypting.\nKeep this archive in at least two safe locations, including outside your phone.\nIf a browser blocks local file crypto, open RECOVER.html using a small local HTTP server or a modern desktop browser.\n\nBACKUP ENCRYPTION: PBKDF2-SHA256, 310000 iterations, 16-byte random salt, AES-256-GCM, 12-byte IV. Encrypted payload starts with 8 ASCII bytes WEASE02!, then salt, IV, ciphertext plus GCM authentication tag.\n`;
-async function createRawBackupZip({asBytes=false}={}){
+async function exportDeviceRecovery(button){
+ button.disabled=true;const status=document.getElementById('device-recovery-status');if(status)status.textContent='Reading local records and attachments…';
+ try{const zip=await createRawBackupZip({recovery:true});downloadBlob(zip,'WarrantyEase-device-'+new Date().toISOString().replace(/[:.]/g,'-')+'.zip');if(status)status.textContent='Export prepared. Check Downloads; see RECOVERY-REPORT.txt for missing files.';}catch(e){if(status)status.textContent='Export failed: '+e.message;toast('Export failed: '+e.message);}finally{button.disabled=false;}
+}
+async function createRawBackupZip({asBytes=false,recovery=false}={}){
  const deleted=await storeAction(META_STORE,'readonly',st=>st.get('syncTombstones'));
   const manifest={app:'Warranty Ease',version:3,exportedAt:new Date().toISOString(),records:[],websiteAccounts,websiteVault:vaultMeta,deletions:deleted?.items||[]};
- const items=[];
+ const items=[],issues=[];let recoveredCount=0;
  let readable='WARRANTY EASE - APPLIANCE INDEX\nExported: '+manifest.exportedAt+'\n\n';
  for(const r of appliances){
   const clone={...r,files:[]};
   for(const f of r.files||[]){
-    if(!(f.blob instanceof Blob)||!f.blob.size)throw Error('Missing original evidence file '+f.name+'. Automatic repair is required before syncing.');
     const path=`files/${r.id}/${f.id}_${safeFileName(f.name)}`;
-    const originalBytes=new Uint8Array(await f.blob.arrayBuffer());if(!validEvidenceBytes(originalBytes,f.mime))throw Error('CORRUPT_EVIDENCE: '+f.name);items.push({name:path,data:originalBytes});
     const {blob,previewBlob,...meta}=f;
+    let originalBytes;try{if(!(blob instanceof Blob)||!blob.size)throw Error('Missing original');originalBytes=new Uint8Array(await blob.arrayBuffer());if(!validEvidenceBytes(originalBytes,f.mime)){if(!recovery)throw Error('CORRUPT_EVIDENCE');const fixed=await recoverEvidenceBytes(originalBytes,path,f.mime);if(!fixed){items.push({name:'quarantine/'+path+'.bin',data:originalBytes});throw Error('Corrupt original retained in quarantine');}originalBytes=fixed;issues.push(path+': recovered nested original');}items.push({name:path,data:originalBytes});recoveredCount++;}catch(e){if(!recovery)throw Error(f.name+': '+e.message);issues.push(path+': '+e.message);clone.files.push({...meta,path,recoveryMissing:true});continue;}
     if(previewBlob instanceof Blob&&previewBlob.size&&previewBlob.type==='image/jpeg'){
       const previewPath=`previews/${r.id}/${f.id}.jpg`;
       // A derived preview must never prevent the original evidence from syncing.
@@ -857,6 +860,7 @@ async function createRawBackupZip({asBytes=false}={}){
  }
  readable+='Note: A warranty end date computed by the app is an estimate, not a guarantee of coverage.\n';
  items.unshift({name:'APPLIANCE-INDEX.txt',data:readable},{name:'warranty-ease-backup.json',data:JSON.stringify(manifest,null,2)});
+ if(recovery)items.push({name:'RECOVERY-REPORT.txt',data:'Records: '+manifest.records.length+'\nOriginals exported: '+recoveredCount+'\n'+(issues.join('\n')||'No missing or corrupt originals detected.')});
  return buildZip(items,{asBytes});
 }
 async function encryptBackupBytes(bytes,passphrase,{asBytes=false}={}){
@@ -1102,9 +1106,9 @@ async function applyRestoredZip(zip,{automatic=false}={}){
   if(!r.id||typeof r.id!=='string'||!Array.isArray(r.files))throw new Error('Invalid record');
   const row={...r,files:[]};
   for(const f of r.files){
-   if(!f.path||!entries.has(f.path))throw new Error('Missing file: '+String(f.name));
+   if(!f.path||(!entries.has(f.path)&&!f.recoveryMissing))throw new Error('Missing file: '+String(f.name));
    const {path,previewPath,...meta}=f;
-   const originalBytes=await recoverEvidenceBytes(entries.get(path),path,meta.mime);
+   const originalBytes=entries.has(path)?await recoverEvidenceBytes(entries.get(path),path,meta.mime):null;delete meta.recoveryMissing;
    const previewBytes=previewPath&&entries.has(previewPath)?await recoverEvidenceBytes(entries.get(previewPath),previewPath,'image/jpeg'):null;
    delete meta.originalHash;delete meta.previewHash;
    const original=originalBytes?new Blob([originalBytes],{type:meta.mime||'application/octet-stream'}):null;
@@ -1273,6 +1277,8 @@ async function handleAction(button) {
  case 'home':closeModal(true);renderHome();break;
  case 'search':closeModal(true);renderHome();document.querySelector('.home-utility')?.classList.add('wallet-show-search');document.getElementById('app-search')?.focus();break;
  case 'settings':closeModal(true);renderSettings();break;
+ case 'device-export':await exportDeviceRecovery(button);break;
+ case 'device-import':{const input=document.getElementById('device-import-file');input.onchange=async()=>{const file=input.files[0];if(!file)return;try{if(await applyRestoredZip(file)){window.WarrantyCloud?.scheduleUpload?.();toast('Recovered records merged.');}}catch(e){toast('Import failed: '+e.message);}finally{input.value='';}};input.click();break;}
  case 'notes':closeModal(true);renderFollowUps();break;
  case 'followup-filter':followUpFilter=['open','done','archived'].includes(button.dataset.filter)?button.dataset.filter:'open';renderFollowUps();break;
  case 'followup-new':openFollowUpEditor(id);break;
