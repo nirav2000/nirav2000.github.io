@@ -780,7 +780,7 @@ function parseReceipt(text) {
 const CRC_TABLE=(()=>{const t=[];for(let i=0;i<256;i++){let c=i;for(let j=0;j<8;j++)c=(c&1)?0xedb88320^(c>>>1):c>>>1;t[i]=c>>>0;}return t;})();
 function crc32(bytes){let c=0xffffffff;for(const b of bytes)c=CRC_TABLE[(c^b)&0xff]^(c>>>8);return (c^0xffffffff)>>>0;}
 const encoder=new TextEncoder(),decoder=new TextDecoder();
-async function buildZip(items) {
+async function buildZip(items,{asBytes=false}={}) {
  const chunks=[],central=[];let offset=0;
  for(const item of items){
   const nameBytes=encoder.encode(item.name);
@@ -796,7 +796,9 @@ async function buildZip(items) {
  }
  const centralSize=central.reduce((a,c)=>a+c.length,0),end=new Uint8Array(22),e=new DataView(end.buffer);
  e.setUint32(0,0x06054b50,true);e.setUint16(8,central.length,true);e.setUint16(10,central.length,true);e.setUint32(12,centralSize,true);e.setUint32(16,offset,true);
- return new Blob([...chunks,...central,end],{type:'application/zip'});
+ const parts=[...chunks,...central,end];
+ if(asBytes){const result=new Uint8Array(offset+centralSize+end.length);let pos=0;for(const part of parts){result.set(part,pos);pos+=part.byteLength;}return result;}
+ return new Blob(parts,{type:'application/zip'});
 }
 function readZip(blob) {
  return blob.arrayBuffer().then(buffer=>{
@@ -825,7 +827,7 @@ const RECOVERY_HTML="<!doctype html>\n<html lang=\"en-GB\"><head><meta charset=\
 // records. It does not depend on the original hosting, server or library CDN.
 const BACKUP_MAGIC='WEASE02!';
 const ARCHIVE_HELP=`WARRANTY EASE - OFFLINE ARCHIVE\n\n1. Extract the files inside this ZIP.\n2. Open RECOVER.html in a modern browser.\n3. Choose backup.encrypted and enter your archive passphrase.\n4. Open the resulting ordinary ZIP: APPLIANCE-INDEX.txt lists your devices and the files folder contains the original evidence.\n5. Website passwords inside the restored records remain encrypted by your separate website vault passphrase.\n\nThe RECOVER.html file works without Warranty Ease's website or any cloud login.\nNo data is uploaded while decrypting.\nKeep this archive in at least two safe locations, including outside your phone.\nIf a browser blocks local file crypto, open RECOVER.html using a small local HTTP server or a modern desktop browser.\n\nBACKUP ENCRYPTION: PBKDF2-SHA256, 310000 iterations, 16-byte random salt, AES-256-GCM, 12-byte IV. Encrypted payload starts with 8 ASCII bytes WEASE02!, then salt, IV, ciphertext plus GCM authentication tag.\n`;
-async function createRawBackupZip(){
+async function createRawBackupZip({asBytes=false}={}){
  const deleted=await storeAction(META_STORE,'readonly',st=>st.get('syncTombstones'));
   const manifest={app:'Warranty Ease',version:3,exportedAt:new Date().toISOString(),records:[],websiteAccounts,websiteVault:vaultMeta,deletions:deleted?.items||[]};
  const items=[];
@@ -842,7 +844,7 @@ async function createRawBackupZip(){
       // A derived preview must never prevent the original evidence from syncing.
       try {
         const bytes=await previewBlob.arrayBuffer();
-        items.push({name:previewPath,data:new Blob([bytes],{type:'image/jpeg'})});
+        items.push({name:previewPath,data:new Uint8Array(bytes)});
         clone.files.push({...meta,path,previewPath});
       } catch(error) {
         if(!['NotFoundError','NotReadableError'].includes(error?.name))throw error;
@@ -855,14 +857,16 @@ async function createRawBackupZip(){
  }
  readable+='Note: A warranty end date computed by the app is an estimate, not a guarantee of coverage.\n';
  items.unshift({name:'APPLIANCE-INDEX.txt',data:readable},{name:'warranty-ease-backup.json',data:JSON.stringify(manifest,null,2)});
- return buildZip(items);
+ return buildZip(items,{asBytes});
 }
-async function encryptBackupBytes(bytes,passphrase){
+async function encryptBackupBytes(bytes,passphrase,{asBytes=false}={}){
   // Failure to encrypt must leave all existing data intact.
   try{
     const salt=randomBytes(16),iv=randomBytes(12),key=await deriveVaultKey(passphrase,salt);
     const encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,bytes));
-    return new Blob([encoder.encode(BACKUP_MAGIC),salt,iv,encrypted],{type:'application/octet-stream'});
+    const header=encoder.encode(BACKUP_MAGIC),result=new Uint8Array(header.length+salt.length+iv.length+encrypted.length);
+    let pos=0;for(const part of [header,salt,iv,encrypted]){result.set(part,pos);pos+=part.length;}
+    return asBytes?result:new Blob([result],{type:'application/octet-stream'});
   }catch(error){
     if(error?.name!=='OperationError')throw error;
     const blocked=new Error('This device could not encrypt the latest changes. Your original files remain locally saved; nothing was overwritten in Cloudflare.');
