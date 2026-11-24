@@ -1,8 +1,8 @@
 /* Warranty Ease scoped offline shell; adapted from shared Apps PWA v1 conventions. */
-const CACHE='warranty-ease-v9-8';
+const CACHE='warranty-ease-v9-9';
 const PREFIX='warranty-ease-v';
 const OCR_CACHE='warranty-ease-ocr-v7';
-const ASSETS=['./','./index.html','./release-check.js?v=0.9.8','./style.css?v=0.9.8','./improvements.css?v=0.9.8','./media.css?v=0.9.8','./followups.css?v=0.9.8','./wallet.css?v=0.9.8','./followups.js?v=0.9.8','./followups-ui.js?v=0.9.8','./media.js?v=0.9.8','./resources.js?v=0.9.8','./cloud-chunks.js?v=0.9.8','./app.js?v=0.9.8','./platform.js?v=0.9.8','./apps-manifest.json','./cloud.js?v=0.9.8','./boot.mjs?v=0.9.8','./ocr-control.js?v=0.9.8','./ocr-extract.js?v=0.9.8','./ocr-crop.js?v=0.9.8','./ocr-runner.js?v=0.9.8','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
+const ASSETS=['./','./index.html','./release-check.js?v=0.9.9','./style.css?v=0.9.9','./improvements.css?v=0.9.9','./media.css?v=0.9.9','./followups.css?v=0.9.9','./wallet.css?v=0.9.9','./followups.js?v=0.9.9','./followups-ui.js?v=0.9.9','./media.js?v=0.9.9','./resources.js?v=0.9.9','./cloud-chunks.js?v=0.9.9','./app.js?v=0.9.9','./platform.js?v=0.9.9','./apps-manifest.json','./cloud.js?v=0.9.9','./boot.mjs?v=0.9.9','./ocr-control.js?v=0.9.9','./ocr-extract.js?v=0.9.9','./ocr-crop.js?v=0.9.9','./ocr-runner.js?v=0.9.9','./recovery.html','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png','./assets/favicon.png'];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await cache.addAll(ASSETS.map(url=>new Request(url,{cache:'reload'})));await self.skipWaiting();})());});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith(PREFIX)&&k!==CACHE&&k!==OCR_CACHE).map(k=>caches.delete(k)));await self.clients.claim();})());});
 self.addEventListener('fetch',event=>{
