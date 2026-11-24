@@ -1,0 +1,25 @@
+{
+  "version": "0.9.7",
+  "files": {
+    "app.js?v=0.9.7": "72e13f2e4c5e7865b8df1005e9b94193dd25e986",
+    "cloud.js?v=0.9.7": "400a0b9a7ac3b21355b22276dd61e5bea4de9410",
+    "index.html": "ae5aa75c4bf9aba92e25d1f6fe056680c788a24e",
+    "service-worker.js": "57cdfebd48506b04ef338b84cb98cd46e89cd738",
+    "release-check.js?v=0.9.7": "9d53e5d563acee6d317178f8153e08cb83c587bc",
+    "style.css?v=0.9.7": "309ce25f26c118729e23c8e93eeef39712034507",
+    "improvements.css?v=0.9.7": "cf391dd013deaecd8e26929a23f5b293776158ad",
+    "media.css?v=0.9.7": "066040d717c1a97c9ab6459546462389c7213ccb",
+    "followups.css?v=0.9.7": "dfb68b0f064ddca9c134e75a91f214f41aa1d745",
+    "wallet.css?v=0.9.7": "c919bfc1a308932b547160bba866aab93098d2c7",
+    "ocr-control.js?v=0.9.7": "b0b3b336c823ab5dd26b88b35085557edda3e9b5",
+    "ocr-extract.js?v=0.9.7": "a7933a1771e946ac8e9e4a232fc1885467e50283",
+    "ocr-crop.js?v=0.9.7": "b3a6ebb53c88673eca4d74d12bf4279e630b2a1a",
+    "media.js?v=0.9.7": "0d60226e7f1267b00e454dbd17e157f9a76dc811",
+    "resources.js?v=0.9.7": "1a9bc3dd7c99b70a9c5e031f373a9953dd2f212a",
+    "cloud-chunks.js?v=0.9.7": "2e22292b9b88c342e687ad123eb4262c9af6800b",
+    "followups.js?v=0.9.7": "769abd687a884c81fab012d19096a930843b571b",
+    "followups-ui.js?v=0.9.7": "6499798b70e7b7f7176a33e20ee2a45f2073cb97",
+    "platform.js?v=0.9.7": "a05d38cdc221f904cbcbd48ba05c452182a228e9",
+    "boot.mjs?v=0.9.7": "1deae18b9bac5910f011dfcec791aad3cb3766fd"
+  }
+}
