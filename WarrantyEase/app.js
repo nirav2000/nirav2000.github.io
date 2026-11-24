@@ -131,10 +131,12 @@ function storeAction(storeName,mode,callback) {return new Promise((resolve,rejec
 function dbAction(mode,callback){return storeAction(DB_STORE,mode,callback);}
 // Read, merge, and write within ONE IndexedDB transaction to prevent OCR and
 // thumbnail generation from overwriting each other's changes.
-function patchStoredFile(recordId,fileId,changes){return new Promise((resolve,reject)=>{
+async function patchStoredFile(recordId,fileId,changes){
+ const storedChanges={...changes};for(const [k,b] of [['blob','originalBytes'],['previewBlob','previewBytes']])if(changes[k] instanceof Blob){storedChanges[b]=await changes[k].arrayBuffer();delete storedChanges[k];}
+ return new Promise((resolve,reject)=>{
  const tx=db.transaction(DB_STORE,'readwrite'),store=tx.objectStore(DB_STORE),req=store.get(recordId);
  req.onsuccess=()=>{const row=req.result,attached=row?.files?.find(f=>f.id===fileId);
-  if(attached){Object.assign(attached,changes);if(Object.keys(changes).some(k=>k!=='previewBlob'))row.updatedAt=new Date().toISOString();store.put(row);}
+  if(attached){Object.assign(attached,storedChanges);if(storedChanges.originalBytes)delete attached.blob;if(storedChanges.previewBytes)delete attached.previewBlob;if(Object.keys(changes).some(k=>k!=='previewBlob'))row.updatedAt=new Date().toISOString();store.put(row);}
  };
  tx.oncomplete=()=>{if(Object.keys(changes).some(key=>key!=='previewBlob')||changes.previewBlob instanceof Blob)window.WarrantyCloud?.scheduleUpload?.();resolve(true)};tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Attachment update could not finish'));
  });}
@@ -154,8 +156,31 @@ async function prepareDisplayImages(recordId,files){
  }
 }
 
-async function refresh() {appliances=await dbAction('readonly',store=>store.getAll());appliances.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));websiteAccounts=await storeAction(ACCOUNTS_STORE,'readonly',store=>store.getAll());websiteAccounts.sort((a,b)=>String(a.brand).localeCompare(String(b.brand)));vaultMeta=await storeAction(META_STORE,'readonly',store=>store.get('vault'))||null;const last=await storeAction(META_STORE,'readonly',store=>store.get('lastBackup'));lastBackupAt=last?.at||null;}
-async function putRecord(record) {record.updatedAt=new Date().toISOString();await dbAction('readwrite',store=>store.put(record));await refresh();window.WarrantyCloud?.scheduleUpload?.();}
+// Persist evidence as inline ArrayBuffers, hydrate fresh Blobs only in memory.
+async function evidenceForStorage(row){
+ const files=[];
+ for(const f of row.files||[]){
+  const out={...f};
+  for(const [blobKey,bytesKey] of [['blob','originalBytes'],['previewBlob','previewBytes']]){
+   if(f[blobKey] instanceof Blob&&f[blobKey].size){
+    try{out[bytesKey]=await f[blobKey].arrayBuffer();delete out[blobKey];}
+    catch(e){if(out[bytesKey] instanceof ArrayBuffer&&out[bytesKey].byteLength)delete out[blobKey];else if(blobKey==='previewBlob')delete out[blobKey];}
+   }
+  }
+  files.push(out);
+ }
+ return {...row,files};
+}
+function hydrateEvidence(row){
+ return {...row,files:(row.files||[]).map(f=>{
+  const out={...f};
+  if(f.originalBytes instanceof ArrayBuffer&&f.originalBytes.byteLength)out.blob=new Blob([f.originalBytes],{type:f.mime||'application/octet-stream'});
+  if(f.previewBytes instanceof ArrayBuffer&&f.previewBytes.byteLength)out.previewBlob=new Blob([f.previewBytes],{type:'image/jpeg'});
+  delete out.originalBytes;delete out.previewBytes;return out;
+ })};
+}
+async function refresh() {appliances=(await dbAction('readonly',store=>store.getAll())).map(hydrateEvidence);appliances.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));websiteAccounts=await storeAction(ACCOUNTS_STORE,'readonly',store=>store.getAll());websiteAccounts.sort((a,b)=>String(a.brand).localeCompare(String(b.brand)));vaultMeta=await storeAction(META_STORE,'readonly',store=>store.get('vault'))||null;const last=await storeAction(META_STORE,'readonly',store=>store.get('lastBackup'));lastBackupAt=last?.at||null;}
+async function putRecord(record) {record.updatedAt=new Date().toISOString();const stored=await evidenceForStorage(record);await dbAction('readwrite',store=>store.put(stored));await refresh();window.WarrantyCloud?.scheduleUpload?.();}
 // A tombstone travels in encrypted backups, preventing an older device from reviving deleted entries.
 async function deleteWithTombstone(storeName,id,kind){
  const deletedAt=new Date().toISOString();
@@ -916,7 +941,7 @@ async function mergeRestoredRecord(incoming,local){
       // iOS WebKit can retain an IndexedDB Blob with a nonzero length even
       // after its backing file becomes unreadable. A newer, verified cloud
       // original is preferred; no archive or conflicting version is deleted.
-      if(['NotFoundError','NotReadableError'].includes(error?.name))return null;
+      if(['NotFoundError','NotReadableError'].includes(error?.name)||/object can not be found|object cannot be found/i.test(String(error?.message)))return null;
       throw error;
     }
   };
@@ -968,10 +993,10 @@ async function mergeRestoredRecord(incoming,local){
     const file={...originalFile};files.set(id,file);
     if(!(file.previewBlob instanceof Blob))continue;
     try{await file.previewBlob.arrayBuffer();}catch(error){
-      if(!['NotFoundError','NotReadableError'].includes(error?.name))throw error;
+      // A derived preview can always be regenerated; never block original recovery.
       const candidates=[...(incoming.files||[]),...(local.files||[])].filter(f=>f.id===id&&f.previewBlob instanceof Blob);
       delete file.previewBlob;
-      for(const candidate of candidates){try{await candidate.previewBlob.arrayBuffer();file.previewBlob=candidate.previewBlob;break;}catch(e){if(!['NotFoundError','NotReadableError'].includes(e?.name))throw e;}}
+      for(const candidate of candidates){try{await candidate.previewBlob.arrayBuffer();file.previewBlob=candidate.previewBlob;break;}catch(e){/* Derived preview unavailable; retain original. */}}
     }
   }
   return {...merged,files:[...files.values()],
@@ -1050,12 +1075,13 @@ async function applyRestoredZip(zip,{automatic=false}={}){
  }
  for(const a of incomingAccounts)if(!a.id||!a.secretBlob?.iv||!a.secretBlob?.ciphertext)throw new Error('Invalid encrypted login');
  if(!automatic&&!window.confirm('Restore '+restored.length+' appliance(s) and '+incomingAccounts.length+' encrypted website login(s)? Existing local evidence is kept.'))return false;
+ const storedRestored=await Promise.all(restored.map(evidenceForStorage));
  // All appliance records, vault entries and deletion history commit together.
  await new Promise((resolve,reject)=>{
   const tx=db.transaction([DB_STORE,ACCOUNTS_STORE,META_STORE],'readwrite');
   const recordStore=tx.objectStore(DB_STORE),accountStore=tx.objectStore(ACCOUNTS_STORE),metaStore=tx.objectStore(META_STORE);
   try{
-   for(const r of restored)recordStore.put(r);
+   for(const r of storedRestored)recordStore.put(r);
    for(const a of incomingAccounts){
     const local=websiteAccounts.find(x=>x.id===a.id);
     const chosen=local&&Date.parse(local.updatedAt||'')>Date.parse(a.updatedAt||'')?local:a;
