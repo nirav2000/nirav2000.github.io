@@ -768,7 +768,7 @@ function readZip(blob) {
    if(!name||name.startsWith('/')||name.includes('../'))throw new Error('Unexpected backup path');
    if(view.getUint32(localPos,true)!==0x04034b50)throw new Error('Invalid ZIP file header');
    const from=localPos+30+view.getUint16(localPos+26,true)+view.getUint16(localPos+28,true);
-   entries.set(name,blob.slice(from,from+size));pos+=46+nlen+extra+comment;
+   if(from+size>bytes.length)throw Error('Invalid ZIP file bounds');entries.set(name,new Blob([bytes.slice(from,from+size)]));pos+=46+nlen+extra+comment;
   }
   return entries;
  });
@@ -956,7 +956,7 @@ async function mergeRestoredRecord(incoming,local){
         files.set(altId,{...file,id:altId,name:'Preserved alternative - '+(file.name||'evidence')});
       }
     }else{
-      const chosen={...file,...previous};
+      const chosen={...file,...previous,blob:(incoming.files||[]).find(f=>f.id===file.id)?.blob||previous.blob};
       for(const k of ['previewBlob','ocrText','ocrSuggestions','ocrAt','ocrKeyLines']){
         if((chosen[k]===undefined||chosen[k]===null||chosen[k]==='')&&file[k]!==undefined)chosen[k]=file[k];
       }
@@ -1040,8 +1040,8 @@ async function applyRestoredZip(zip,{automatic=false}={}){
   for(const f of r.files){
    if(!f.path||!entries.has(f.path))throw new Error('Missing file: '+String(f.name));
    const {path,previewPath,...meta}=f;
-   const original=new Blob([entries.get(path)],{type:meta.mime||'application/octet-stream'});
-   const preview=previewPath&&entries.has(previewPath)?new Blob([entries.get(previewPath)],{type:'image/jpeg'}):null;
+   const original=new Blob([await entries.get(path).arrayBuffer()],{type:meta.mime||'application/octet-stream'});
+   const preview=previewPath&&entries.has(previewPath)?new Blob([await entries.get(previewPath).arrayBuffer()],{type:'image/jpeg'}):null;
    row.files.push({...meta,blob:original,...(preview?.size?{previewBlob:preview}:{})});
   }
   const merged=await mergeRestoredRecord(row,getRecord(row.id));
@@ -1081,7 +1081,7 @@ async function applyRestoredZip(zip,{automatic=false}={}){
  lockVault(true);await refresh();
  for(const record of restored){
    const missingPreviews=(record.files||[]).filter(f=>f.mime?.startsWith('image/')&&f.blob instanceof Blob&&f.blob.size);
-   if(missingPreviews.length)void prepareDisplayImages(record.id,missingPreviews).catch(()=>{});
+   if(missingPreviews.length&&!automatic)void prepareDisplayImages(record.id,missingPreviews).catch(()=>{});
  }
  if(!automatic){closeModal(true);renderHome();toast('Records restored to this device.');}
  else if(!modalKind){if(currentView==='notes')renderFollowUps();else if(currentView==='logins')renderLogins();else renderHome();}
